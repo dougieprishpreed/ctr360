@@ -518,7 +518,9 @@ int NativeDiscImage_ReadDataSectors(const struct NativeDiscImageFile *file, u32 
 
 int NativeDiscImage_ReadRawSectors(const struct NativeDiscImageFile *file, u32 sector, u32 sectorCount, void *dst)
 {
-	u8 raw[NATIVE_DISC_IMAGE_RAW_SECTOR_SIZE];
+	// This reader shares the image FILE with the other disc calls. Batch its
+	// sequential reads on the calling thread; never do image I/O in the mixer.
+	static u8 raw[16 * NATIVE_DISC_IMAGE_RAW_SECTOR_SIZE];
 	u8 *out = (u8 *)dst;
 
 	if ((file == NULL) || (dst == NULL))
@@ -532,14 +534,30 @@ int NativeDiscImage_ReadRawSectors(const struct NativeDiscImageFile *file, u32 s
 		return 0;
 	}
 
-	for (u32 i = 0; i < sectorCount; i++)
+	if (sectorCount == 0) return 1;
+	u64 offset = ((u64)file->lba + sector) * NATIVE_DISC_IMAGE_RAW_SECTOR_SIZE;
+	if (s_nativeDiscImageFile == NULL || offset > (u64)LONG_MAX ||
+	    fseek(s_nativeDiscImageFile, (long)offset, SEEK_SET) != 0)
 	{
-		if (!NativeDiscImage_ReadRawSector(file->lba + sector + i, raw))
+		return 0;
+	}
+	for (u32 i = 0; i < sectorCount; )
+	{
+		u32 count = sectorCount - i;
+		if (count > 16) count = 16;
+		size_t bytes = (size_t)count * NATIVE_DISC_IMAGE_RAW_SECTOR_SIZE;
+		if (fread(raw, 1, bytes, s_nativeDiscImageFile) != bytes)
 		{
 			return 0;
 		}
-
-		memcpy(&out[i * NATIVE_DISC_IMAGE_MODE2_USER_SIZE], &raw[NATIVE_DISC_IMAGE_MODE2_USER_OFFSET], NATIVE_DISC_IMAGE_MODE2_USER_SIZE);
+		for (u32 j = 0; j < count; j++)
+		{
+			u8 *rawSector = raw + (size_t)j * NATIVE_DISC_IMAGE_RAW_SECTOR_SIZE;
+			if (!NativeDiscImage_CheckRawSectorHeader(rawSector)) return 0;
+			memcpy(out + (size_t)(i + j) * NATIVE_DISC_IMAGE_MODE2_USER_SIZE,
+			       rawSector + NATIVE_DISC_IMAGE_MODE2_USER_OFFSET, NATIVE_DISC_IMAGE_MODE2_USER_SIZE);
+		}
+		i += count;
 	}
 
 	return 1;

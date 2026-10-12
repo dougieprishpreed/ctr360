@@ -204,6 +204,28 @@ static void DrawTiresSolid_SetupGteState(struct DrawTiresScratch *scratch, struc
 	scratch->splitCameraY = splitCameraY;
 }
 
+static int DrawTires_ReciprocalLength(int length)
+{
+#if defined(CTR_NATIVE)
+	// A view vector or its cross product can vanish at an edge-on camera angle.
+	// Xenon traps integer division by zero; leave that wheel's axes degenerate
+	// so projection can omit its zero-area quad and keep the other wheels.
+	if (length == 0)
+	{
+		return 0;
+	}
+#endif
+	return 0x10000 / length;
+}
+
+static int DrawTires_HasWheelAxes(struct DrawTiresScratch *scratch, int wheelIndex)
+{
+	SVec3Slot *a = &scratch->tireAxisA[wheelIndex];
+	SVec3Slot *b = &scratch->tireAxisB[wheelIndex];
+	return (a->x != 0 || a->y != 0 || a->z != 0) &&
+	       (b->x != 0 || b->y != 0 || b->z != 0);
+}
+
 static void DrawTiresSolid_BuildWheelAxes(struct DrawTiresScratch *scratch)
 {
 	// NOTE(aalhendi): PSX-backfeed blocker: retail uses s7/t8 as scratchpad
@@ -235,7 +257,7 @@ static void DrawTiresSolid_BuildWheelAxes(struct DrawTiresScratch *scratch)
 
 		gte_lcv1_b();
 		wheelLocal->center.z.word = centerZ;
-		int invLen = -(0x10000 / len);
+		int invLen = -DrawTires_ReciprocalLength(len);
 
 		int rimX = MFC2_S(9);
 		int rimY = MFC2_S(10);
@@ -264,7 +286,7 @@ static void DrawTiresSolid_BuildWheelAxes(struct DrawTiresScratch *scratch)
 
 		gte_sqr0_b();
 		len = Unknown_8006ef98(MFC2_S(25) + MFC2_S(26) + MFC2_S(27));
-		invLen = 0x10000 / len;
+		invLen = DrawTires_ReciprocalLength(len);
 
 		axisX = (axisX * invLen) >> 4;
 		MTC2(axisX, 9);
@@ -286,7 +308,7 @@ static void DrawTiresSolid_BuildWheelAxes(struct DrawTiresScratch *scratch)
 
 		gte_sqr0_b();
 		len = Unknown_8006ef98(MFC2_S(25) + MFC2_S(26) + MFC2_S(27));
-		invLen = (wheelSize * -(0x10000 / len)) >> 12;
+		invLen = (wheelSize * -DrawTires_ReciprocalLength(len)) >> 12;
 
 		axisB->x = (axisX * invLen) >> 10;
 		axisB->y = (axisY * invLen) >> 10;
@@ -537,6 +559,13 @@ static int DrawTiresSolid_ProjectWheelQuads(struct DrawTiresScratch *scratch, st
 	// depth-bias scratch updates, UV copy, and OT linking.
 	for (int wheelIndex = 3; wheelIndex >= 0; wheelIndex--)
 	{
+#if defined(CTR_NATIVE)
+		if (!DrawTires_HasWheelAxes(scratch, wheelIndex))
+		{
+			if (wheelIndex >= 2) scratch->cornerDepthBias[wheelIndex & 1] = 0;
+			continue;
+		}
+#endif
 		DrawTiresSolid_LoadCorner(scratch, 0, wheelIndex, -1, -1);
 		DrawTiresSolid_LoadCorner(scratch, 1, wheelIndex, 1, -1);
 		DrawTiresSolid_LoadCorner(scratch, 2, wheelIndex, -1, 1);
@@ -827,7 +856,7 @@ static void DrawTiresReflection_BuildWheelAxes(struct DrawTiresScratch *scratch)
 
 		gte_lcv1_b();
 		wheelLocal->center.z.word = centerZ;
-		int invLen = -(0x10000 / len);
+		int invLen = -DrawTires_ReciprocalLength(len);
 
 		int rimX = MFC2_S(9);
 		int rimY = -MFC2_S(10);
@@ -856,7 +885,7 @@ static void DrawTiresReflection_BuildWheelAxes(struct DrawTiresScratch *scratch)
 
 		gte_sqr0_b();
 		len = Unknown_8006ef98(MFC2_S(25) + MFC2_S(26) + MFC2_S(27));
-		invLen = 0x10000 / len;
+		invLen = DrawTires_ReciprocalLength(len);
 
 		axisX = (axisX * invLen) >> 4;
 		MTC2(axisX, 9);
@@ -878,7 +907,7 @@ static void DrawTiresReflection_BuildWheelAxes(struct DrawTiresScratch *scratch)
 
 		gte_sqr0_b();
 		len = Unknown_8006ef98(MFC2_S(25) + MFC2_S(26) + MFC2_S(27));
-		invLen = (wheelSize * -(0x10000 / len)) >> 12;
+		invLen = (wheelSize * -DrawTires_ReciprocalLength(len)) >> 12;
 
 		axisB->x = (axisX * invLen) >> 10;
 		axisB->y = (axisY * invLen) >> 10;
@@ -1104,6 +1133,13 @@ static int DrawTiresReflection_ProjectWheelQuads(struct DrawTiresScratch *scratc
 	// reflected SXY scratch order used by the later jump-table primitive path.
 	for (int wheelIndex = 3; wheelIndex >= 0; wheelIndex--)
 	{
+#if defined(CTR_NATIVE)
+		if (!DrawTires_HasWheelAxes(scratch, wheelIndex))
+		{
+			if (wheelIndex >= 2) scratch->cornerDepthBias[wheelIndex & 1] = 0;
+			continue;
+		}
+#endif
 		DrawTiresReflection_LoadCorner(scratch, 0, wheelIndex, -1, -1);
 		DrawTiresReflection_LoadCorner(scratch, 1, wheelIndex, 1, -1);
 		DrawTiresReflection_LoadCorner(scratch, 2, wheelIndex, -1, 1);

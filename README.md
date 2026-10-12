@@ -4,7 +4,7 @@ A native Xbox 360 port of **Crash Team Racing**, based on [CTR Native](https://g
 
 CTR360 runs the game from your own PlayStation disc dump. It includes 1280×720 rendering, an expanded 16:9 view, texture filtering, edge smoothing, controller input, audio, and persistent saves. Single-player races target 60 FPS rendering while keeping the original 30 Hz game simulation. Adventure hubs, menus, and other modes retain their normal cadence.
 
-This is a development build. It has been played on real Xbox 360 hardware, including Adventure mode and saving/loading, but performance, graphics, and stability issues can remain. The latest performance and hub-transition repairs still need further console testing; a locked 60 FPS is not guaranteed.
+This is a development build. It has been played on real Xbox 360 hardware, including Adventure mode and saving/loading, but performance, graphics, and stability issues can remain. The latest fixes for race-end stutters, wheel-rendering crashes, and Adventure hub transitions still need further console testing; a locked 60 FPS is not guaranteed.
 
 ## What you need
 

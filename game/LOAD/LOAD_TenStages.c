@@ -720,6 +720,20 @@ int LOAD_TenStages(struct GameTracker *gGT, int loadingStage, struct BigHeader *
 			return loadingStage;
 		}
 
+#if defined(_XBOX)
+		// Race-end XA tracks share a large interleaved file. Prepare the two
+		// compressed channels behind the loading flag, rather than scanning
+		// USB/HDD synchronously when the player crosses the finish line.
+		if (LOAD_IsOpen_RacingOrBattle() && gGT->numPlyrCurrGame != 0)
+		{
+			if (!NativeAudio_PreloadXATrack(CDSYS_XA_TYPE_MUSIC, 4) ||
+			    !NativeAudio_PreloadXATrack(CDSYS_XA_TYPE_MUSIC, 5))
+			{
+				Platform_LogWarn("[load] XA race-end preload unavailable; playback will use the disc\n");
+			}
+		}
+#endif
+
 		// MAIN_MENU is used for main menu, scrapbook, and adventure garage.
 		if (((gGT->gameMode1 & MAIN_MENU) != 0) && (gGT->levelID != ADVENTURE_GARAGE))
 		{

@@ -3,6 +3,7 @@
 #include <platform/native_assets.h>
 #include <platform/native_disc_image.h>
 #include <platform/native_perf.h>
+#include <platform/native_log.h>
 
 #include <SDL3/SDL.h>
 #include <limits.h>
@@ -242,6 +243,10 @@ struct NativeAudioXaSource
 	int sectorSize;
 	int sectorBase;
 	int totalSectors;
+	u8 *readBuffer;
+	int readLimit;
+	int firstBufferedSector;
+	int bufferedSectors;
 };
 
 struct NativeAudioXaPreparedStream
@@ -254,6 +259,22 @@ struct NativeAudioXaPreparedStream
 	int sampleRate;
 	int numChannels;
 };
+
+// Only explicitly preloaded transition tracks are retained. Active playback
+// owns a separate compressed copy, so stopping/replacing it cannot free a
+// cached track. Both preparation and cache access stay on the game thread.
+#define NATIVE_AUDIO_XA_CACHE_SLOTS 2
+#define NATIVE_AUDIO_XA_CACHE_BYTES (8u * 1024u * 1024u)
+#define NATIVE_AUDIO_XA_READ_BATCH 16
+struct NativeAudioXaCacheEntry
+{
+	int valid;
+	int categoryID;
+	int xaID;
+	struct NativeAudioXaPreparedStream prepared;
+};
+static struct NativeAudioXaCacheEntry s_xaCache[NATIVE_AUDIO_XA_CACHE_SLOTS];
+static size_t s_xaCacheBytes;
 
 // Compressed XA sectors stay resident while their PCM is decoded through a
 // small ring. This keeps file I/O out of SDL's audio callback without bringing
@@ -1909,6 +1930,7 @@ internal void NativeAudio_XaSourceClose(struct NativeAudioXaSource *src)
 	{
 		fclose(src->file);
 	}
+	free(src->readBuffer);
 	memset(src, 0, sizeof(*src));
 }
 
@@ -1966,21 +1988,34 @@ internal int NativeAudio_XaSourceReadSector(struct NativeAudioXaSource *src, int
 		return 0;
 	}
 
-	if (src->kind == NATIVE_AUDIO_XA_SOURCE_HOST_FILE)
+	if (src->readBuffer == NULL)
 	{
-		if (fseek(src->file, (long)sector * (long)src->sectorSize, SEEK_SET) != 0)
+		src->readBuffer = (u8 *)malloc((size_t)NATIVE_AUDIO_XA_READ_BATCH * (size_t)src->sectorSize);
+		if (src->readBuffer == NULL) return 0;
+	}
+	if (src->bufferedSectors == 0 || sector < src->firstBufferedSector ||
+	    sector - src->firstBufferedSector >= src->bufferedSectors)
+	{
+		int count = src->readLimit - sector;
+		if (count > NATIVE_AUDIO_XA_READ_BATCH) count = NATIVE_AUDIO_XA_READ_BATCH;
+		if (count <= 0) return 0;
+		size_t bytes = (size_t)count * (size_t)src->sectorSize;
+		src->bufferedSectors = 0;
+		if (src->kind == NATIVE_AUDIO_XA_SOURCE_HOST_FILE)
 		{
-			return 0;
+			if (fseek(src->file, (long)sector * (long)src->sectorSize, SEEK_SET) != 0 ||
+			    fread(src->readBuffer, 1, bytes, src->file) != bytes) return 0;
 		}
-		return fread(dst, 1, (size_t)src->sectorSize, src->file) == (size_t)src->sectorSize;
+		else if (src->kind == NATIVE_AUDIO_XA_SOURCE_DISC)
+		{
+			if (!NativeDiscImage_ReadRawSectors(&src->discFile, (u32)sector, (u32)count, src->readBuffer)) return 0;
+		}
+		else return 0;
+		src->firstBufferedSector = sector;
+		src->bufferedSectors = count;
 	}
-
-	if (src->kind == NATIVE_AUDIO_XA_SOURCE_DISC)
-	{
-		return NativeDiscImage_ReadRawSectors(&src->discFile, (u32)sector, 1, dst);
-	}
-
-	return 0;
+	memcpy(dst, src->readBuffer + (size_t)(sector - src->firstBufferedSector) * (size_t)src->sectorSize, (size_t)src->sectorSize);
+	return 1;
 }
 
 internal void NativeAudio_XaPreparedStreamClose(struct NativeAudioXaPreparedStream *prepared)
@@ -2007,6 +2042,8 @@ internal int NativeAudio_PrepareXAStream(struct NativeAudioXaSource *src, int ch
 	}
 
 	int sectorsToScan = maxSectors < src->totalSectors ? maxSectors : src->totalSectors;
+	src->readLimit = sectorsToScan;
+	src->bufferedSectors = 0;
 
 	for (int sector = 0; sector < sectorsToScan; sector++)
 	{
@@ -2092,6 +2129,77 @@ internal int NativeAudio_PrepareXAStream(struct NativeAudioXaSource *src, int ch
 	prepared->frameCount = audioSectors * framesPerSector;
 	prepared->sampleRate = sampleRate;
 	prepared->numChannels = numChannels;
+	return 1;
+}
+
+internal int NativeAudio_FindCachedXA(int categoryID, int xaID)
+{
+	for (int i = 0; i < NATIVE_AUDIO_XA_CACHE_SLOTS; i++)
+	{
+		if (s_xaCache[i].valid && s_xaCache[i].categoryID == categoryID && s_xaCache[i].xaID == xaID) return i;
+	}
+	return -1;
+}
+
+internal void NativeAudio_ClearXACache(void)
+{
+	for (int i = 0; i < NATIVE_AUDIO_XA_CACHE_SLOTS; i++)
+	{
+		NativeAudio_XaPreparedStreamClose(&s_xaCache[i].prepared);
+	}
+	memset(s_xaCache, 0, sizeof(s_xaCache));
+	s_xaCacheBytes = 0;
+}
+
+internal int NativeAudio_PrepareXATrack(int categoryID, int xaID, struct NativeAudioXaPreparedStream *prepared, int useCache)
+{
+	struct NativeAudioXaTrackInfo info;
+	struct NativeAudioXaSource source;
+	char path[128];
+	int cached = useCache ? NativeAudio_FindCachedXA(categoryID, xaID) : -1;
+	memset(prepared, 0, sizeof(*prepared));
+	if (cached >= 0)
+	{
+		const struct NativeAudioXaPreparedStream *saved = &s_xaCache[cached].prepared;
+		size_t bytes = (size_t)saved->sectorCount * (size_t)saved->sectorSize;
+		u8 *copy = (u8 *)malloc(bytes);
+		if (copy == NULL) return 0;
+		memcpy(copy, saved->sectors, bytes);
+		*prepared = *saved;
+		prepared->sectors = copy;
+		Platform_Log("[audio] XA cache-hit category=%d track=%d bytes=%u\n", categoryID, xaID, (unsigned)bytes);
+		return 1;
+	}
+	if (!NativeAudio_LookupXATrackInfo(categoryID, xaID, &info) ||
+	    !NativeAudio_BuildXAPath(path, sizeof(path), categoryID, info.fileNumber) ||
+	    !NativeAudio_XaSourceOpen(path, &source)) return 0;
+	int result = NativeAudio_PrepareXAStream(&source, info.channelFilter, info.numSectors, prepared);
+	NativeAudio_XaSourceClose(&source);
+	return result;
+}
+
+int NativeAudio_PreloadXATrack(int categoryID, int xaID)
+{
+	struct NativeAudioXaPreparedStream prepared;
+	int slot = -1;
+	if (NativeAudio_FindCachedXA(categoryID, xaID) >= 0) return 1;
+	for (int i = 0; i < NATIVE_AUDIO_XA_CACHE_SLOTS; i++)
+	{
+		if (!s_xaCache[i].valid) { slot = i; break; }
+	}
+	if (slot < 0 || !NativeAudio_PrepareXATrack(categoryID, xaID, &prepared, 0)) return 0;
+	size_t bytes = (size_t)prepared.sectorCount * (size_t)prepared.sectorSize;
+	if (bytes > NATIVE_AUDIO_XA_CACHE_BYTES - s_xaCacheBytes)
+	{
+		NativeAudio_XaPreparedStreamClose(&prepared);
+		return 0;
+	}
+	s_xaCache[slot].categoryID = categoryID;
+	s_xaCache[slot].xaID = xaID;
+	s_xaCache[slot].prepared = prepared;
+	s_xaCache[slot].valid = 1;
+	s_xaCacheBytes += bytes;
+	Platform_Log("[load] XA cached category=%d track=%d bytes=%u total=%u\n", categoryID, xaID, (unsigned)bytes, (unsigned)s_xaCacheBytes);
 	return 1;
 }
 
@@ -2912,6 +3020,7 @@ void NativeAudio_Shutdown(void)
 	}
 
 	NativeAudio_CloseXANoLock();
+	NativeAudio_ClearXACache();
 	SDL_QuitSubSystem(SDL_INIT_AUDIO);
 }
 
@@ -3309,34 +3418,17 @@ int NativeAudio_IsXAPlaying(void)
 
 int NativeAudio_PlayXATrack(int categoryID, int xaID, int volumeLeft, int volumeRight)
 {
-	struct NativeAudioXaTrackInfo info;
-	struct NativeAudioXaSource source;
 	struct NativeAudioXaPreparedStream prepared;
-	char path[128];
 
 	if (!NativeAudio_SpuInit())
 	{
 		return 0;
 	}
 
-	if (!NativeAudio_LookupXATrackInfo(categoryID, xaID, &info))
+	if (!NativeAudio_PrepareXATrack(categoryID, xaID, &prepared, 1))
 	{
 		return 0;
 	}
-	if (!NativeAudio_BuildXAPath(path, sizeof(path), categoryID, info.fileNumber))
-	{
-		return 0;
-	}
-	if (!NativeAudio_XaSourceOpen(path, &source))
-	{
-		return 0;
-	}
-	if (!NativeAudio_PrepareXAStream(&source, info.channelFilter, info.numSectors, &prepared))
-	{
-		NativeAudio_XaSourceClose(&source);
-		return 0;
-	}
-	NativeAudio_XaSourceClose(&source);
 
 	NativeAudio_LockOutput();
 

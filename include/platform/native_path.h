@@ -1,0 +1,144 @@
+#ifndef NATIVE_PATH_H
+#define NATIVE_PATH_H
+
+#include "platform/native_str8.h"
+
+static inline s32 NativePath_IsSeparator(u8 byte)
+{
+	return (byte == '/') || (byte == '\\');
+}
+
+static inline u8 NativePath_HostSeparator(void)
+{
+#if defined(_XBOX)
+	/* XDK file APIs use device paths such as game:\assets\ctr-u.bin. */
+	return '\\';
+#else
+	return '/';
+#endif
+}
+
+static inline NativeStr8 NativePath_TrimTrailingSeparators(NativeStr8 path)
+{
+	while ((path.len > 1) && NativePath_IsSeparator(path.ptr[path.len - 1u]))
+	{
+		/* Preserve the root separator for C:\ and named Xbox devices. */
+		if ((path.len >= 3) && (path.ptr[path.len - 2u] == ':'))
+		{
+			break;
+		}
+
+		path.len--;
+	}
+
+	return path;
+}
+
+static inline NativeStr8 NativePath_SkipLeadingSeparators(NativeStr8 path)
+{
+	while ((path.len != 0) && NativePath_IsSeparator(path.ptr[0]))
+	{
+		path = NativeStr8_Skip(path, 1);
+	}
+
+	return path;
+}
+
+static inline s32 NativePath_NormalizeSlashes(char *dst, size_t dstSize, NativeStr8 path)
+{
+	if ((dst == NULL) || (dstSize == 0) || (path.len >= dstSize))
+	{
+		return 0;
+	}
+
+	if ((path.ptr == NULL) && (path.len != 0))
+	{
+		return 0;
+	}
+
+	for (size_t i = 0; i < path.len; i++)
+	{
+		u8 byte = path.ptr[i];
+		dst[i] = (char)(NativePath_IsSeparator(byte) ? NativePath_HostSeparator() : byte);
+	}
+
+	dst[path.len] = '\0';
+	return 1;
+}
+
+static inline s32 NativePath_Join(char *dst, size_t dstSize, NativeStr8 left, NativeStr8 right)
+{
+	NativeStr8 rightPart = NativePath_SkipLeadingSeparators(right);
+
+	if ((dst == NULL) || (dstSize == 0))
+	{
+		return 0;
+	}
+
+	if (((left.ptr == NULL) && (left.len != 0)) || ((rightPart.ptr == NULL) && (rightPart.len != 0)))
+	{
+		return 0;
+	}
+
+	if (left.len == 0)
+	{
+		return NativePath_NormalizeSlashes(dst, dstSize, rightPart);
+	}
+
+	s32 needsSeparator = (rightPart.len != 0) && !NativePath_IsSeparator(left.ptr[left.len - 1u]);
+	if (left.len + (size_t)needsSeparator + rightPart.len >= dstSize)
+	{
+		return 0;
+	}
+
+	if (!NativePath_NormalizeSlashes(dst, dstSize, left))
+	{
+		return 0;
+	}
+
+	size_t writeAt = left.len;
+	if (needsSeparator != 0)
+	{
+		dst[writeAt++] = (char)NativePath_HostSeparator();
+	}
+
+	if (rightPart.len != 0)
+	{
+		for (size_t i = 0; i < rightPart.len; i++)
+		{
+			u8 byte = rightPart.ptr[i];
+			dst[writeAt + i] = (char)(NativePath_IsSeparator(byte) ? NativePath_HostSeparator() : byte);
+		}
+	}
+
+	dst[writeAt + rightPart.len] = '\0';
+	return 1;
+}
+
+static inline s32 NativePath_Parent(char *dst, size_t dstSize, NativeStr8 path)
+{
+	size_t sepIndex;
+
+	path = NativePath_TrimTrailingSeparators(path);
+	if (!NativeStr8_LastIndexOfAny(path, '/', '\\', &sepIndex))
+	{
+		return 0;
+	}
+
+	if (sepIndex == 0)
+	{
+		path.len = 1;
+	}
+	else if ((sepIndex > 0) && (path.ptr[sepIndex - 1u] == ':'))
+	{
+		path.len = sepIndex + 1u;
+	}
+	else
+	{
+		path.len = sepIndex;
+	}
+
+	return NativePath_NormalizeSlashes(dst, dstSize, path);
+}
+
+#endif

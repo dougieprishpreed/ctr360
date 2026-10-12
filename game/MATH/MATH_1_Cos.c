@@ -1,0 +1,26 @@
+#include <common.h>
+
+int MATH_Cos(u32 angle)
+{
+	u32 trig = CTR_TrigApproxWord(&data.trigApprox[ANG_MODULO_HALF_PI(angle)]);
+	s32 cosine;
+
+	if ((angle & ANG_QUADRANT_BIT) != 0)
+	{
+		cosine = (s32)(trig << 0x10) >> 0x10;
+		if ((angle & ANG_SIGN_BIT) == 0)
+		{
+			cosine = -cosine;
+		}
+	}
+	else
+	{
+		cosine = (s32)trig >> 0x10;
+		if ((angle & ANG_SIGN_BIT) != 0)
+		{
+			cosine = -cosine;
+		}
+	}
+
+	return cosine;
+}

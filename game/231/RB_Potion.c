@@ -1,0 +1,200 @@
+#include <common.h>
+
+// Required to make door open when driver hits potion, or potion shatters due to full MinePool.
+void RB_Potion_OnShatter_TeethCallback(struct ScratchpadStruct *sps, void *hitObject)
+{
+	struct BSP *bspHitbox;
+	struct InstDef *instDef;
+	struct Instance *teethInst;
+	(void)sps;
+	bspHitbox = hitObject;
+
+
+	instDef = bspHitbox->data.hitbox.instDef;
+	if (instDef != NULL)
+	{
+		if (teethInst = instDef->ptrInstance, teethInst != NULL)
+		{
+			if ((s16)instDef->modelID == STATIC_TEETH) // tiger temple door
+			{
+				RB_Teeth_OpenDoor(teethInst);
+			}
+		}
+	}
+}
+
+void RB_Potion_OnShatter_TeethSearch(struct Instance *inst)
+{
+	struct ScratchpadStruct *sps = CTR_SCRATCHPAD_PTR(struct ScratchpadStruct, 0x108);
+
+	sps->Input1.pos.x = (s16)inst->matrix.t[0];
+	sps->Input1.pos.y = (s16)inst->matrix.t[1];
+	sps->Input1.pos.z = (s16)inst->matrix.t[2];
+	sps->Input1.hitRadius = 0x140;
+	sps->Input1.hitRadiusSquared = 0x19000;
+	sps->Union.ThBuckColl.thread = inst->thread;
+	sps->Input1.modelID = inst->model->id;
+	sps->Union.ThBuckColl.funcCallback = RB_Potion_OnShatter_TeethCallback;
+
+	PROC_StartSearch_Self(sps);
+}
+
+void RB_Potion_ThTick_InAir(struct Thread *t)
+{
+	int hitY;
+	int prevY;
+	struct GameTracker *gGT;
+	struct GameTracker *collisionTracker;
+	struct Instance *inst;
+	struct MineWeapon *mw;
+
+	SVec3 posBottom;
+	SVec3 posTop;
+
+	struct BSP *bspHitbox;
+	struct InstDef *instDef;
+
+	struct ScratchpadStruct *sps = CTR_SCRATCHPAD_PTR(struct ScratchpadStruct, 0x108);
+
+	inst = t->inst;
+	mw = inst->thread->object;
+	gGT = GAME_TRACKER;
+
+	// adjust position, by velocity, do NOT use parenthesis
+	inst->matrix.t[0] += mw->velocity.x * gGT->elapsedTimeMS >> 5;
+	inst->matrix.t[1] += mw->velocity.y * gGT->elapsedTimeMS >> 5;
+	inst->matrix.t[2] += mw->velocity.z * gGT->elapsedTimeMS >> 5;
+
+	// gravity, decrease velocity over time
+	mw->velocity.y -= ((gGT->elapsedTimeMS << 2) >> 5);
+
+	// terminal velocity
+	if (mw->velocity.y < -0x60)
+	{
+		mw->velocity.y = -0x60;
+	}
+
+	mw->cooldown -= GAME_TRACKER->elapsedTimeMS;
+
+	if (mw->cooldown < 0)
+	{
+		mw->cooldown = 0;
+	}
+
+	posBottom.x = inst->matrix.t[0];
+	posBottom.y = inst->matrix.t[1] - 0x40;
+	posBottom.z = inst->matrix.t[2];
+
+	posTop.x = inst->matrix.t[0];
+	posTop.y = inst->matrix.t[1] + 0x100;
+	posTop.z = inst->matrix.t[2];
+
+	sps->Union.QuadBlockColl.quadFlagsWanted = QUADBLOCK_FLAG_GROUND | QUADBLOCK_FLAG_TRIGGER;
+	sps->Union.QuadBlockColl.quadFlagsIgnored = 0;
+	sps->Union.QuadBlockColl.searchFlags = COLL_SEARCH_TEST_INSTANCES | COLL_SEARCH_FORCE_INSTANCE_HIT;
+
+	collisionTracker = GAME_TRACKER;
+	if (collisionTracker->numPlyrCurrGame < 3)
+	{
+		sps->Union.QuadBlockColl.searchFlags = COLL_SEARCH_TEST_INSTANCES | COLL_SEARCH_HIGH_LOD | COLL_SEARCH_FORCE_INSTANCE_HIT;
+	}
+
+	sps->ptr_mesh_info = collisionTracker->level1->ptr_mesh_info;
+
+	COLL_SearchBSP_CallbackQUADBLK(&posBottom, &posTop, sps, 0);
+
+	RB_MakeInstanceReflective(sps, inst);
+
+	if ((sps->collision.stepFlags & COLL_STEP_TRIGGER_WEAPON_REACT) != 0)
+	{
+		RB_GenericMine_ThDestroy(t, inst, mw);
+	}
+
+
+	if (sps->boolDidTouchHitbox != 0)
+	{
+		// A closed temple door shatters the potion; an already-open door does not.
+		b32 destroy = 1;
+		bspHitbox = sps->bspHitbox;
+		if ((((u8)bspHitbox->flag & 0x80) != 0) && (instDef = bspHitbox->data.hitbox.instDef, instDef != NULL) && ((s16)instDef->modelID == STATIC_TEETH) &&
+		    (instDef->ptrInstance != NULL))
+		{
+			if ((sdata->doorAccessFlags & 1) != 0)
+			{
+				destroy = 0;
+			}
+			else
+			{
+				RB_Teeth_OpenDoor(instDef->ptrInstance);
+			}
+		}
+		if (destroy)
+		{
+			RB_GenericMine_ThDestroy(t, inst, mw);
+		}
+	}
+	else
+	{
+		if (sps->boolDidTouchQuadblock != 0)
+		{
+			VehPhysForce_RotAxisAngle(&inst->matrix, CTR_VECTOR_DATA(&(sps->hit.plane.normal)), 0);
+
+			hitY = sps->Union.QuadBlockColl.hitPos.y;
+			prevY = inst->matrix.t[1];
+
+			if (hitY + 0x30 < prevY)
+			{
+				return;
+			}
+
+			// if no cooldown
+			if (mw->cooldown == 0)
+			{
+				// set position to where quadblock was hit
+				inst->matrix.t[1] = hitY;
+
+				mw->stopFallAtY = sps->Union.QuadBlockColl.hitPos.y;
+				mw->cooldown = 0xf00; // 3.84s
+				mw->velocity.x = 0;
+				mw->velocity.y = 0;
+				mw->velocity.z = 0;
+				mw->flags &= ~MINE_WEAPON_FLAG_THROWN;
+
+				ThTick_SetAndExec(t, RB_GenericMine_ThTick);
+				return;
+			}
+
+			// if instance is under hitPos, move up
+			if (prevY <= hitY)
+			{
+				inst->matrix.t[1] = hitY;
+			}
+
+			// if distance to move back to quadblock < velocity
+			if (mw->velocity.y < (inst->matrix.t[1] - prevY) + 0x28)
+			{
+				mw->velocity.y = (inst->matrix.t[1] - prevY) + 0x28;
+			}
+
+			return;
+		}
+
+		// if did not touch quadblock in range [-0x40, 0x100],
+		// check again with range [-0x900, 0x100]
+
+		// posBottom
+		posBottom.x = inst->matrix.t[0];
+		posBottom.y = inst->matrix.t[1] - 0x900;
+		posBottom.z = inst->matrix.t[2];
+
+		COLL_SearchBSP_CallbackQUADBLK(&posBottom, &posTop, sps, 0);
+
+		// Destroy only when the wider search also finds no ground.
+		if (sps->boolDidTouchQuadblock == 0)
+		{
+			RB_GenericMine_ThDestroy(t, inst, mw);
+		}
+	}
+
+	return;
+}

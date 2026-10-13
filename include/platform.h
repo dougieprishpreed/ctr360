@@ -12,6 +12,8 @@ struct PlatformMempackArena
 
 void Platform_Init(const char *title, int width, int height);
 void Platform_Shutdown(void);
+// Does not return. Xbox explicitly launches the dashboard; CRT exit bugchecks.
+void Platform_Exit(int status);
 void Platform_InitScratchpad(void);
 const struct PlatformMempackArena *Platform_InitMempackArena(void);
 const struct PlatformMempackArena *Platform_GetMempackArena(void);

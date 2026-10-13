@@ -21,7 +21,7 @@ static void LOAD_NativeReadFailure(int file, const char *reason)
 {
 	Platform_LogError("[load] file=%d cannot be loaded: %s; stopping before relocation\n", file, reason);
 	Platform_LogFlush();
-	exit(EXIT_FAILURE);
+	Platform_Exit(EXIT_FAILURE);
 }
 #endif
 
@@ -381,7 +381,12 @@ void *LOAD_ReadFile_ex(struct BigHeader *bigfile, u32 loadType, int subfileIndex
 		sectorSize = sectorCount << LOAD_CD_DATA_SECTOR_SHIFT;
 #if defined(CTR_NATIVE)
 		if (sectorSize > MEMPACK_GetFreeBytes())
+		{
+			Platform_LogError("[load] file=%d allocation bytes=%d rounded=%d free=%d low=%08x high=%08x\n",
+			                  subfileIndex, eSize, sectorSize, MEMPACK_GetFreeBytes(),
+			                  (unsigned)(u32)allocationPack->firstFreeByte, (unsigned)(u32)allocationPack->lastFreeByte);
 			LOAD_NativeReadFailure(subfileIndex, "insufficient allocator space");
+		}
 #endif
 		ptrDst = (void *)MEMPACK_AllocMem(sectorSize, NULL); // "FILE"
 		if (ptrDst == NULL)
@@ -433,9 +438,9 @@ void *LOAD_ReadFile_ex(struct BigHeader *bigfile, u32 loadType, int subfileIndex
 			Platform_LogError("[load] disc read failed file=%d sector=%d bytes=%d after %d attempts; stopping before relocation\n",
 			                  subfileIndex, eOffs, eSize, attempts);
 			Platform_LogFlush();
-			/* No caller can safely resume a half-replaced level. A controlled
-			 * process exit returns to the launcher instead of using its bytes. */
-			exit(EXIT_FAILURE);
+			/* No caller can safely resume a half-replaced level. The platform
+			 * returns to the dashboard on Xbox; CRT exit would bugcheck it. */
+			Platform_Exit(EXIT_FAILURE);
 			return NULL;
 		}
 #else

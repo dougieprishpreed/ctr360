@@ -251,7 +251,7 @@ void RB_Banner_LInB(struct Instance *inst)
 
 	{
 		s16 i;
-		u8 *color = (u8 *)inst->model->headers->ptrColors;
+		u32 *color = inst->model->headers->ptrColors;
 
 		// The palette carries two sine cycles; animation rotates it one sample per tick.
 		for (i = 0; i < 0x40;)
@@ -277,10 +277,12 @@ void RB_Banner_LInB(struct Instance *inst)
 			}
 
 			i++;
-			color[2] = (u8)value;
-			color[1] = (u8)value;
-			color[0] = (u8)value;
-			color += 4;
+			/* The cooker and renderer treat this palette as numeric words.
+			 * Byte offsets 0..2 on Xenon overwrite the high command byte and
+			 * leave red unchanged (e.g. 0x008c8c8c becomes 0x8c8c8c00).
+			 * Keep the reserved high byte and replace numeric RGB together. */
+			*color = (*color & 0xff000000u) | ((u32)(u8)value * 0x00010101u);
+			color++;
 		}
 	}
 }

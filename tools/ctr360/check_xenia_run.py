@@ -15,7 +15,7 @@ def check(directory, minimum_race_age=None):
         # A missing optional disc may be satisfied by extracted asset overrides.
         'startup_failures': r'\[boot\] (?:asset-validation|platform-init) FAILED\b|\[CTR Native\] (?:missing asset:|Missing or invalid assets|Failed to )',
         'guest_faults': r'\[fault\]',
-        'packet_failures': r'invalid tag length|invalid-prim|invalid OT link|overshoot|OT walk[^\r\n]*(?:cycle|cap)',
+        'packet_failures': r'invalid tag length|invalid packet length|invalid-prim|invalid OT link|overshoot|OT walk[^\r\n]*(?:cycle|cap)|Unhandled (?:zero length|tagless)[^\r\n]*primitive|\[CTR GPU\] packet reports kind=\d+ suppressed=[1-9]\d*',
         'gpu_link_failures': r'GPU link bridge (?:has no token|failed to register)',
         'asset_contract_failures': r'\[asset-contract\]',
     }

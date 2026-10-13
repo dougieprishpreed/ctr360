@@ -68,6 +68,7 @@ static int pack,clearCount,hubReads,modelReads,waits;
 static void Platform_Log(const char *fmt,...){(void)fmt;}
 static void Platform_LogFlush(void){}
 static void MEMPACK_SwapPacks(int id){pack=id;}
+static int MEMPACK_GetFreeBytes(void){return LOAD_ADV_ARENA_FIRST_PACK_BYTES;}
 static void MEMPACK_ClearLowMem(void){memset(&resident[pack],0x61,sizeof resident[pack]);clearCount++;}
 static void LOAD_AppendQueue(struct BigHeader*b,int type,int file,void*dst,void(*cb)(struct LoadQueueSlot*)){
  (void)b;(void)type;assert(sdata->queueLength<8);
@@ -98,6 +99,7 @@ static void LevInstDef_UnPack(void*p){assert(p==(void*)7);}
 static void DecalGlobal_Store(struct GameTracker*g,void*p){(void)g;assert(p==(void*)9);}
 static void MainInit_VisMem(struct GameTracker*g){(void)g;}
 static void CDSYS_XAPauseRequest(void){}
+static void CDSYS_XAPauseAtEnd(void){}
 '''
 # Existing conditional model publication is unrelated to the residency test.
 prelude = prelude.replace('void *PatchMem_Ptr;', 'void *PatchMem_Ptr;int PLYROBJECTLIST;')

@@ -79,6 +79,7 @@ void LOAD_Hub_SwapNow()
 		while (sdata->load_inProgress || sdata->queueLength || !sdata->queueReady)
 		{
 			LOAD_NextQueuedFile();
+			CDSYS_XAPauseAtEnd();
 			VSync(0);
 		}
 		if ((u32)(destination - GEM_STONE_VALLEY) >= LOAD_ADV_HUB_COUNT)
@@ -95,6 +96,9 @@ void LOAD_Hub_SwapNow()
 	while (gGT->level2 == 0)
 	{
 		LOAD_NextQueuedFile();
+#ifdef CTR_NATIVE
+		CDSYS_XAPauseAtEnd();
+#endif
 		VSync(0);
 	}
 

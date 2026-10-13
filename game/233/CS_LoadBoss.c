@@ -17,6 +17,16 @@ void CS_LoadBoss(const struct BossCutsceneData *bcd)
 	const s32 *files = bcd->fileIDs;
 
 	CDSYS_XAPauseRequest();
+#ifdef CTR_NATIVE
+	/* A hub preload can still own the alternate pack. Complete that batch
+	 * before the boss clears it, preserving its VRAM bookmarks and callbacks. */
+	while (sdata->load_inProgress || sdata->queueLength || !sdata->queueReady)
+	{
+		LOAD_NextQueuedFile();
+		CDSYS_XAPauseAtEnd();
+		VSync(0);
+	}
+#endif
 	for (i = CS_BOSS_MODEL_COUNT - 1; i >= 0; i--)
 		CS_BOSS_MODELS[i] = NULL;
 

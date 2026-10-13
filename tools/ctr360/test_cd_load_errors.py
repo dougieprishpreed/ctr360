@@ -51,7 +51,7 @@ static void NativeCD_SetLastCom(int com){}
 static void Platform_LogError(const char*fmt,...){}
 static void Platform_LogFlush(void){flushes++;}
 static void fixtureExit(int status){exitStatus=status;longjmp(failureJump,1);}
-#define exit fixtureExit
+#define Platform_Exit fixtureExit
 struct BigEntry {int offset,size;};
 struct BigHeader {int numEntry,cdpos;struct BigEntry entries[1];};
 #define BIG_GETENTRY(x) ((x)->entries)

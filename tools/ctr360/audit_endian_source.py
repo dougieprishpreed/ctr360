@@ -42,12 +42,20 @@ def native_lines(source):
 
 def findings(source):
     function = ''
+    numeric_palette_bytes = set()
     for number, line in native_lines(source):
         if line.lstrip().startswith('//'):
             continue
         definition = re.match(r'^(?:static\s+|inline\s+|__inline\s+)*(?:void|int|u32|s32|s16|MATRIX\s*\*)\s+(\w+)\s*\(', line)
         if definition:
             function = definition[1]
+            numeric_palette_bytes.clear()
+        alias = re.search(r'\b(?:u8|s8|char)\s*\*\s*(\w+)\s*=\s*\([^;]+\*\s*\)[^;]*->ptr(?:Colors|ColorLayout)\b', line)
+        if alias:
+            numeric_palette_bytes.add(alias[1])
+        for name in numeric_palette_bytes:
+            if re.search(r'\b'+re.escape(name)+r'\s*\[[^\]]+\]\s*(?:[|&^+\-]?=)', line):
+                yield number, 'error', 'byte store into numeric model palette; preserve numeric RGB/code', line.strip()
         if re.search(r'CTR_ReadU(?:16|32)(?:Aligned)?LE\([^;]*(?:&data\b|&(?:driver|d)->(?:rotCurr|AxisAngle\d_normalVec|posCurr))', line):
             yield number, 'error', 'LE reader on native runtime state', line.strip()
         if re.search(r'\*\s*\([^)]*(?:u32|s32|int|CtrPackedU32)[^)]*\)\s*&[^;]*(?:teamOfEachPlayer|animFrame|vertSplit|->(?:r[0-3]|x[0-3]|u[0-3])\b)\s*=', line):
@@ -110,6 +118,14 @@ packet[0] = tag;
     assert [(x[0], x[1]) for x in found] == [(2, 'error'), (6, 'error'), (7, 'review')]
     assert not list(findings('#ifndef CTR_NATIVE\n*(u32 *)&p->r0 = 1;\n#endif'))
     assert not list(findings('CtrGpu_WriteColorCode(&p->r0, color);'))
+    assert any(x[1] == 'error' for x in findings('''void RB_Banner_LInB(void)\n{
+u8 *color = (u8 *)inst->model->headers->ptrColors;
+color[2] = value;
+}'''))
+    assert not list(findings('''void RB_Banner_LInB(void)\n{
+u32 *color = inst->model->headers->ptrColors;
+*color = (*color & 0xff000000u) | (value * 0x010101u);
+}'''))
     for bad in ('p->flagsAxis = CTR_ReadU32LE(&p->flagsAxis);',
                 'CTR_WriteU32LE(&p->flagsAxis, bits);',
                 'packet->line.xy0 = MFC2(12);',

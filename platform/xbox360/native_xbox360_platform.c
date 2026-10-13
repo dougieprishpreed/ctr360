@@ -132,6 +132,21 @@ void Platform_Init(const char *title, int width, int height)
 	Platform_InputInit();
 }
 
+void Platform_Exit(int status)
+{
+	/* XDK CRT exit/return-to-CRT terminates with KeBugCheck, not a title
+	 * switch. Use the same explicit dashboard launch as the quit chord. */
+	Platform_Log("[CTR Native] returning to dashboard status=%d\n", status);
+	Platform_LogFlush();
+	Platform_Shutdown();
+	Platform_LogShutdown();
+	XLaunchNewImage(NULL, NULL);
+	for (;;)
+	{
+		Sleep(1000);
+	}
+}
+
 void Platform_Shutdown(void)
 {
 	if (s_platformInitialized == 0)
@@ -346,12 +361,7 @@ void Platform_PollHostEvents(void)
 		if ((state.Gamepad.wButtons & quitChord) == quitChord)
 		{
 			Platform_Log("[CTR Native] quit chord pressed, leaving to dashboard\n");
-			Platform_LogShutdown();
-			XLaunchNewImage(NULL, NULL);
-			for (;;)
-			{
-				Sleep(1000);
-			}
+			Platform_Exit(0);
 		}
 	}
 }

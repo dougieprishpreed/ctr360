@@ -32,7 +32,36 @@ extern int g_dbg_emulatorPaused;
 extern int g_dbg_polygonSelected;
 
 #define NATIVE_GPU_LOG(fmt, ...)   Platform_Log("[CTR GPU] " fmt, __VA_ARGS__)
-#define NATIVE_GPU_ERROR(fmt, ...) Platform_LogError("[CTR GPU] [%s] - " fmt, __func__, __VA_ARGS__)
+/* Malformed effects can otherwise generate hundreds of durable reports per
+ * frame. Keep independent samples for walker, primitive, tagless and length
+ * faults so a flood of opcode errors cannot hide the useful packet dump. */
+static int NativeGpu_PacketReportBudget(unsigned kind)
+{
+	static u32 windowStart;
+	static unsigned emitted[4], suppressed[4];
+	u32 now = (u32)Platform_GetVBlankCount();
+	unsigned i;
+	if (now - windowStart >= 60)
+	{
+		for (i = 0; i < 4; i++)
+		{
+			if (suppressed[i] != 0)
+				Platform_Log("[CTR GPU] packet reports kind=%u suppressed=%u\n", i, suppressed[i]);
+			emitted[i] = suppressed[i] = 0;
+		}
+		windowStart = now;
+	}
+	if (emitted[kind] < 2)
+	{
+		emitted[kind]++;
+		return 1;
+	}
+	if (suppressed[kind] != 0xffffffffu) suppressed[kind]++;
+	return 0;
+}
+
+#define NATIVE_GPU_ERROR_AT(kind, fmt, ...) do { if (NativeGpu_PacketReportBudget(kind)) Platform_LogError("[CTR GPU] [%s] - " fmt, __func__, __VA_ARGS__); } while (0)
+#define NATIVE_GPU_ERROR(fmt, ...) NATIVE_GPU_ERROR_AT(0, fmt, __VA_ARGS__)
 #define NATIVE_GPU_ERROR_PLAIN(text) Platform_LogError("[CTR GPU] " text)
 
 /* The XDK CRT's _vsnprintf does not handle the 'z' length modifier ('%zx',
@@ -1357,33 +1386,20 @@ void ParsePrimitivesLinkedList(u32 *p, int singlePrimitive)
 					currentPacket += primLength * sizeof(u32);
 				}
 
-				if (currentPacket != endPacket)
+				if (currentPacket != endPacket && NativeGpu_PacketReportBudget(3))
 				{
 					char packetRegion[64];
 					u32 w0, w1, w2, w3;
-					NativeGpu_DiagTraceOnce("prims-overshoot", (const void *)basePacket, (int)(endPacket - currentPacket));
 					w0 = NativeGpu_ReadPacketWordForLog((uintptr_t)basePacket, 0);
 					w1 = NativeGpu_ReadPacketWordForLog((uintptr_t)basePacket, 1);
 					w2 = NativeGpu_ReadPacketWordForLog((uintptr_t)basePacket, 2);
 					w3 = NativeGpu_ReadPacketWordForLog((uintptr_t)basePacket, 3);
-					NativeGpu_DiagTraceOnce("overshoot-words", (const void *)basePacket, 0);
-					Platform_Log("[trace] GPU invalid-prim-words diff=%d packet=%p words=%08x %08x %08x %08x\n",
-					             (int)(endPacket - currentPacket), (void *)basePacket, (unsigned)w0, (unsigned)w1, (unsigned)w2, (unsigned)w3);
-					NativeGpu_DiagTraceOnce("overshoot-words-printed", (const void *)basePacket, 0);
 					NativeGpu_FormatPointerRegion(packetRegion, sizeof(packetRegion), (uintptr_t)basePacket);
-					NativeGpu_DiagTraceOnce("overshoot-region", packetRegion, 0);
-					/* The report goes to the stdout path (proven alive in every
-					   run); the stderr variant's first-ever console write wedged
-					   the guest thread on frame 13 with no output and no fault.
-					   Keep the durable report on the path that reaches the log. */
-					Platform_Log("[trace] GPU invalid-prim diff=%d packet=%p region=%s words=%08x %08x %08x %08x\n",
+					/* One essential report retains the bytes and region even with
+					 * tracing off, without duplicate immediate flushes per packet. */
+					Platform_Log("[CTR GPU] invalid packet length diff=%d packet=%p region=%s words=%08x %08x %08x %08x\n",
 					             (int)(endPacket - currentPacket), (void *)basePacket, packetRegion, (unsigned)w0, (unsigned)w1, (unsigned)w2,
 					             (unsigned)w3);
-					NativeGpu_DiagTraceOnce("overshoot-stdout", (const void *)basePacket, 0);
-					NATIVE_GPU_ERROR("did not output valid primitive or ptag length is not valid (diff=%d packet=%p region=%s words=%08x %08x %08x %08x)\n",
-					                 (int)(endPacket - currentPacket), (void *)basePacket, packetRegion, (unsigned)w0, (unsigned)w1, (unsigned)w2,
-					                 (unsigned)w3);
-					NativeGpu_DiagTraceOnce("overshoot-stderr", (const void *)basePacket, 0);
 				}
 			}
 
@@ -2194,7 +2210,7 @@ int ParsePrimitive(P_TAG *polyTag)
 
 	if (primLength == 0 && !handledZeroLength)
 	{
-		NATIVE_GPU_ERROR("Unhandled zero length %0x primitive\n", primType);
+		NATIVE_GPU_ERROR_AT(1, "Unhandled zero length %0x primitive\n", primType);
 	}
 
 	return primLength;
@@ -2221,7 +2237,7 @@ int ParseTaglessPrimitive(u32 *command)
 
 	if (primLength == 0)
 	{
-		NATIVE_GPU_ERROR("Unhandled tagless primitive %08x\n", code);
+		NATIVE_GPU_ERROR_AT(2, "Unhandled tagless primitive %08x\n", code);
 		return 1;
 	}
 

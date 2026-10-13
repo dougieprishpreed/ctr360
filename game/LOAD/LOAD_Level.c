@@ -5,6 +5,18 @@
 // game does 3-GetAdvPackIndex to load the hub you ARE on
 void LOAD_TalkingMask(int packID, int maskID)
 {
+#ifdef CTR_NATIVE
+	/* A hub preload owns this pack until its final callback. The normal
+	 * hint request waits across frames; direct callers must also finish the
+	 * old batch before resetting memory or appending mask files behind it. */
+	while (sdata->load_inProgress || sdata->queueLength || !sdata->queueReady)
+	{
+		LOAD_NextQueuedFile();
+		CDSYS_XAPauseAtEnd();
+		VSync(0);
+	}
+#endif
+
 	sdata->modelMaskHints3D = 0;
 
 	// invalidate alternative-hub, because
@@ -22,6 +34,10 @@ void LOAD_TalkingMask(int packID, int maskID)
 	// wipe the pack to reload the new MASK
 	MEMPACK_SwapPacks(packID);
 	MEMPACK_ClearLowMem();
+#ifdef CTR_NATIVE
+	Platform_Log("[load] mask begin pack=%d mask=%d free=%d destination=%d\n", packID, maskID,
+	             MEMPACK_GetFreeBytes(), sdata->gGT->levID_in_each_mempack[packID]);
+#endif
 
 	sdata->load_inProgress = 1;
 

@@ -656,7 +656,15 @@ void RenderAllHUD(struct GameTracker *gGT)
 					{
 						AH_Map_Main();
 
-						if (sdata->AkuHint_RequestedHint != -1)
+						if (sdata->AkuHint_RequestedHint != -1
+#ifdef CTR_NATIVE
+						    /* Keep the hint request pending until the existing batch
+						     * releases the inactive pack. Starting the mask here
+						     * could clear a hub preload and append behind its callback,
+						     * which switches the allocator back to the current hub. */
+						    && !sdata->load_inProgress && !sdata->queueLength && sdata->queueReady
+#endif
+						   )
 						{
 							AH_MaskHint_Start(sdata->AkuHint_RequestedHint, sdata->AkuHint_boolInterruptWarppad);
 

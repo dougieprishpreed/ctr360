@@ -96,6 +96,7 @@ int main(void)
 	{
 		Platform_LogError("[CTR Native] Failed to initialize asset paths.\n");
 		Platform_LogShutdown();
+		Platform_Exit(1);
 		return 1;
 	}
 
@@ -108,6 +109,7 @@ int main(void)
 	{
 		Platform_LogError("[boot] asset-validation FAILED\n");
 		Platform_LogShutdown();
+		Platform_Exit(1);
 		return 1;
 	}
 
@@ -120,6 +122,7 @@ int main(void)
 	{
 		Platform_LogError("[memcard] Failed to configure game:\\memcards\n");
 		Platform_LogShutdown();
+		Platform_Exit(1);
 		return 1;
 	}
 	Platform_Log("[memcard] root=game:\\memcards (beside default.xex)\n");
@@ -130,6 +133,7 @@ int main(void)
 	{
 		Platform_LogError("[boot] platform-init FAILED\n");
 		Platform_LogShutdown();
+		Platform_Exit(1);
 		return 1;
 	}
 	Platform_Log("[CTR Native] Platform ready\n");
@@ -143,7 +147,7 @@ int main(void)
 	result = CTR_Main();
 	Platform_Log("[CTR Native] CTR_Main returned %d\n", result);
 
-	Platform_Shutdown();
+	Platform_Exit(result);
 
 	return result;
 }

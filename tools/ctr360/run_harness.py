@@ -52,10 +52,13 @@ BUILD_PROBES = ["xs-pick f=%d", "xq f=%d", "trace mask="]
 HEARTBEAT_RE = re.compile(r"\[probe\]\s+(?:hbm|hb)\s+f=(\d+)\b")
 PACKET_FAILURES = (
     "invalid tag length",
+    "invalid packet length",
     "invalid-prim",
     "did not output valid primitive",
     "Unhandled tagless primitive",
     "Unhandled tagless",
+    "Unhandled zero length",
+    "[CTR GPU] packet reports kind=",
     "-guard",
 )
 CPU_ACTIVE_SECONDS = 0.05

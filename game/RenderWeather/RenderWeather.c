@@ -26,7 +26,7 @@ CTR_STATIC_ASSERT(offsetof(LINE_G2, x1) == 0x10);
 
 static u32 RenderWeather_ReadWord(const void *base, int offset)
 {
-	return *(const u32 *)(const void *)((const char *)base + offset);
+	return CTR_ReadU32LE((const char *)base + offset);
 }
 
 static struct TrigPair RenderWeather_TrigAngleSinCos(int angle)
@@ -113,7 +113,6 @@ static int RenderWeather_IsVisible(u32 gteFlag, u32 sxy0, u32 sxy1, u32 screenBo
 void RenderWeather(struct PushBuffer *pb, struct PrimMem *primMem, struct RainBuffer *rainBuffer, u8 numPlyr, int gameMode1)
 {
 	u32 *prim = (u32 *)primMem->cursor;
-	u32 *rainWords = (u32 *)(void *)rainBuffer;
 	// NOTE(aalhendi): PSX-backfeed blocker: retail saves/restores callee
 	// registers in scratchpad 0x00-0x2c. Native C relies on the host ABI; restore
 	// the scratchpad register-save prologue/epilogue before PSX backfeed.
@@ -169,7 +168,7 @@ void RenderWeather(struct PushBuffer *pb, struct PrimMem *primMem, struct RainBu
 	scratch->packedCenterXY = 0x04000000u | centerX;
 	scratch->centerZ = (u32)((trig.cos >> 2) + 0x400);
 
-	screenBounds = RenderWeather_ReadWord(pb, 0x20);
+	screenBounds = CTR_PackS16Pair(pb->rect.w, pb->rect.h);
 	ot = &pb->ptrOT[rainBuffer->offsetOT];
 
 	CTC2((u32)(s32)pb->rect.w << 15, 24);
@@ -206,32 +205,34 @@ void RenderWeather(struct PushBuffer *pb, struct PrimMem *primMem, struct RainBu
 		}
 	}
 
-	particleCount = (u32)currentParticles;
+	particleCount = currentParticles > 0 ? (u32)currentParticles : 0;
 
-	scrollXY = rainWords[2];
-	scrollZ = (s32)rainWords[3];
-	velocityXY = rainWords[4] & RENDER_WEATHER_XY_MASK;
-	velocityZ = (s32)rainWords[5];
+	/* The opaque serialized weather scroll/velocity block stays LE. */
+	scrollXY = CTR_ReadU32LE((u8 *)rainBuffer + 8);
+	scrollZ = (s32)CTR_ReadU32LE((u8 *)rainBuffer + 12);
+	velocityXY = CTR_ReadU32LE((u8 *)rainBuffer + 16) & RENDER_WEATHER_XY_MASK;
+	velocityZ = (s32)CTR_ReadU32LE((u8 *)rainBuffer + 20);
 
 	scrollXYEnd = (scrollXY + velocityXY) & RENDER_WEATHER_XY_MASK;
 	scrollZEnd = scrollZ + velocityZ;
 	if (gameMode1 == 0)
 	{
-		rainWords[2] = scrollXYEnd;
-		rainWords[3] = (u32)scrollZEnd;
+		CTR_WriteU32LE((u8 *)rainBuffer + 8, scrollXYEnd);
+		CTR_WriteU32LE((u8 *)rainBuffer + 12, (u32)scrollZEnd);
 	}
 
 	scrollXYStart = (scrollXY + ((u32)((s32)velocityXY >> 1) & RENDER_WEATHER_XY_MASK)) & RENDER_WEATHER_XY_MASK;
 	scrollZStart = scrollZ + (velocityZ >> 1);
 
-	cameraXY = RenderWeather_ReadWord(pb, 0x00) & RENDER_WEATHER_XY_MASK;
+	cameraXY = CTR_PackS16Pair(pb->pos.x, pb->pos.y) & RENDER_WEATHER_XY_MASK;
 	cameraZ = pb->pos.z;
-	prevCameraXY = rainWords[6];
-	prevCameraZ = *(s16 *)(void *)((char *)rainBuffer + 0x1c);
+	prevCameraXY = CTR_PackS16Pair(rainBuffer->cameraPos.x, rainBuffer->cameraPos.y);
+	prevCameraZ = rainBuffer->cameraPos.z;
 	if (gameMode1 == 0)
 	{
-		rainWords[6] = cameraXY;
-		*(s16 *)(void *)((char *)rainBuffer + 0x1c) = pb->pos.z;
+		rainBuffer->cameraPos.x = (s16)cameraXY;
+		rainBuffer->cameraPos.y = (s16)(cameraXY >> 16);
+		rainBuffer->cameraPos.z = pb->pos.z;
 	}
 
 	cameraDeltaXY = cameraXY - prevCameraXY;
@@ -256,6 +257,8 @@ void RenderWeather(struct PushBuffer *pb, struct PrimMem *primMem, struct RainBu
 	state1 = 0x493583fe;
 	RenderWeather_NextRng(&state0, &state1, &rngXY, &rngZ);
 
+	if (!CtrGpu_PrimFits(prim, primMem->guardEnd, sizeof(struct CtrGpuDrawModePacket)))
+		return;
 	while (particleCount != 0)
 	{
 		u32 xy0;
@@ -301,6 +304,8 @@ void RenderWeather(struct PushBuffer *pb, struct PrimMem *primMem, struct RainBu
 
 				if (RenderWeather_IsVisible(gteFlag, sxy0, sxy1, screenBounds))
 				{
+					if (!CtrGpu_PrimFits(prim, primMem->guardEnd, sizeof(LINE_G2) + sizeof(struct CtrGpuDrawModePacket)))
+						break;
 					LINE_G2 *line = (LINE_G2 *)prim;
 
 					CtrGpu_WriteColorCode(&line->r0, scratch->colorTop);

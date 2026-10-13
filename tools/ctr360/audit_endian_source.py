@@ -61,6 +61,18 @@ def findings(source):
             yield number, 'error', 'LE word spans native particle/tracker halfwords', line.strip()
         if re.search(r'packet->line\.(?:color\w*|xy\d)\s*=', line):
             yield number, 'error', 'particle line packet needs color-byte/native-XY writers', line.strip()
+        if re.search(r'(?:packet->body\.(?:color\w*|xy\d|uv\d)|mask->xy\d)\s*=', line):
+            yield number, 'error', 'ghost packet mixed fields need component writers', line.strip()
+        if re.search(r'CTR_(?:Read|Write)U32(?:Aligned)?LE\([^;]*&\w+->(?:scroll\.x|screenPosition)', line):
+            yield number, 'error', 'serialized word access on native screen/scroll state', line.strip()
+        if re.search(r'memcpy\([^;]*CreditsLevHeader[^;]*->size', line):
+            yield number, 'error', 'raw serialized credits size used as native copy length', line.strip()
+        if re.search(r'CTR_WriteU32(?:Aligned)?LE\(creditsData', line):
+            yield number, 'error', 'credits relocation publishes LE bytes as a native pointer', line.strip()
+        if function == 'MATH_VectorLength' and re.search(r'CTR_ReadU32(?:Aligned)?LE\(vector', line):
+            yield number, 'error', 'vector length must load native components', line.strip()
+        if re.search(r'CtrGpu_WritePackedUVWord\([^;]*scratch->uv\w*\.word', line):
+            yield number, 'error', 'UV byte/native-halfword union needs numeric component packing', line.strip()
         if re.search(r'\*\s*\(\s*(?:u8|s8|char)\s*\*\s*\)\s*&\w+->(?:cameraID|state)\b', line):
             yield number, 'error', 'address-order byte of native scalar; use a numeric cast', line.strip()
         if re.search(r'CTR_GteStoreMAC\(\s*(?:&(?:mac|lightMac|viewMac)\.?\w*|out|vec|output)\s*\)', line):
@@ -103,7 +115,13 @@ packet[0] = tag;
                 'packet->line.xy0 = MFC2(12);',
                 'CTR_GteStoreMAC(&mac.vx);',
                 'SetTransMatrix(&inst->matrix);',
-                'speed = inst->matrix.m[0][2];'):
+                'speed = inst->matrix.m[0][2];',
+                'packet->body.uv0 = texWord;',
+                'mask->xy0 = MFC2(12);',
+                'CTR_WriteU32LE(&rainLocal->scroll.x, next);',
+                'memcpy(dst, src, ((struct CreditsLevHeader *)src)->size);',
+                'CTR_WriteU32AlignedLE(creditsData, pointer);',
+                'CtrGpu_WritePackedUVWord(&p->u0, scratch->uv0.word);'):
         assert any(item[1] == 'error' for item in findings(bad)), bad
     assert not list(findings('speed = (s16)CTR_ReadU16LE(&inst->matrix.m[0][2]);'))
     assert not list(findings('CTR_WriteU16LE(&inst->matrix.m[0][0], 4096);'))
@@ -116,12 +134,15 @@ if __name__ == '__main__':
     args = parser.parse_args()
     self_test()
     root = Path(__file__).resolve().parents[2]
-    result = {'scope': 'game sources, native-visible branches', 'files': 0, 'errors': [], 'review': [],
+    result = {'scope': 'game sources plus shared active GTE/GPU headers and native CD/audio boundaries; native-visible branches', 'files': 0, 'errors': [], 'review': [],
               'boundary_inventory': [],
               'rotation_exceptions': {
                   'RaceFlag_LoadMatrix': 'compiled constant; numeric GTE transfer',
                   'VehPhysForce_RotAxisAngle': 'native staging then complete LE serialization'}}
-    for path in sorted((root/'game').rglob('*.c')):
+    paths = list((root/'game').rglob('*.c')) + [root/p for p in (
+        'include/ctr_gte.h', 'include/ctr_gte_transfer.h', 'include/gpu.h',
+        'platform/native_cd.c', 'platform/native_audio.c')]
+    for path in sorted(paths):
         result['files'] += 1
         for line, severity, reason, source in findings(path.read_text(encoding='latin1')):
             result['errors' if severity == 'error' else 'review'].append(

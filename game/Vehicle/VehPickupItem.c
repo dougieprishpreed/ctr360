@@ -443,7 +443,11 @@ struct Driver *VehPickupItem_MissileGetTargetDriver(struct Driver *driver)
 #endif
 		CTR_PSX_GTE_PIPELINE_DELAY();
 		gte_rtps();
+#ifdef CTR_NATIVE
+		projection.screenPosition = MFC2(14);
+#else
 		CTR_PSX_STORE_COP2_WORD(screenPositionPtr, 14);
+#endif
 
 #ifdef CTR_NATIVE
 		{
@@ -482,7 +486,11 @@ struct Driver *VehPickupItem_MissileGetTargetDriver(struct Driver *driver)
 			continue;
 		}
 
+#ifdef CTR_NATIVE
+		screenY = (s16)((u32)projection.screenPosition >> 16);
+#else
 		screenY = (s16)CTR_ReadU16LE((const u8 *)screenPositionPtr + sizeof(u16));
+#endif
 		if (screenY < MISSILE_TARGET_SCREEN_TOP)
 		{
 			continue;

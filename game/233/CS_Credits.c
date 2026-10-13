@@ -1,4 +1,32 @@
 #include <common.h>
+#ifdef CTR_NATIVE
+#include <platform/native_log.h>
+#endif
+
+static int CS_Credits_ValidateStrings(const u8 *src, u32 available, u32 *size, u16 *count)
+{
+	u32 i;
+	u32 tableEnd;
+	if (src == NULL || available < 8) return 0;
+	*size = CTR_ReadU32LE(src);
+	*count = CTR_ReadU16LE(src + 4);
+	tableEnd = 8 + (u32)*count * 4;
+	if (*count <= 20 || *size < tableEnd || *size > available) return 0;
+	for (i = 0; i < *count; i++)
+	{
+		u32 offset = CTR_ReadU32LE(src + 8 + i * 4);
+		if (offset < tableEnd || offset >= *size || memchr(src + offset, 0, *size - offset) == NULL)
+			return 0;
+	}
+	return 1;
+}
+
+static u32 CS_Credits_FadeColor(u32 color, s32 amount)
+{
+	return (color & 0xff000000u) | (((color & 255) * amount) >> 8) |
+	       (((((color >> 8) & 255) * amount) >> 8) << 8) |
+	       (((((color >> 16) & 255) * amount) >> 8) << 16);
+}
 
 enum CreditsRuntimeConstants
 {
@@ -120,9 +148,36 @@ void CS_Credits_Init(void)
 	struct Thread *creditThread;
 	struct CreditsLevHeader *creditsDst;
 	u8 *creditsData;
+	u32 creditsSize;
+	u16 creditsCount;
+	u32 available;
 	struct GameTracker *gGT;
 	u32 *rewards = sdata->advProgress.rewards;
 	CS_CREDITS_DANCER_THREAD = NULL;
+	CS_CREDITS_THREAD = NULL;
+	CS_CREDITS_STRINGS = NULL;
+	CS_CREDITS_STRING_COUNT = 0;
+	creditsData = (u8 *)(ST1_GETPOINTERS(GAME_TRACKER->level1->ptrSpawnType1))[ST1_CREDITS];
+#ifdef CTR_NATIVE
+	available = 0;
+	for (i = 0; i < 4; i++)
+	{
+		struct Mempack *pack = &MEMPACK_POOLS[i];
+		if (pack->start != NULL && creditsData >= (u8 *)pack->start && creditsData < (u8 *)pack->firstFreeByte)
+			available = (u32)((u8 *)pack->firstFreeByte - creditsData);
+	}
+#else
+	available = CTR_ReadU32LE(creditsData);
+#endif
+	if (!CS_Credits_ValidateStrings(creditsData, available, &creditsSize, &creditsCount) ||
+	    MEMPACK_ALIGN_SIZE(creditsSize) > (u32)((u8 *)MEMPACK_ACTIVE->lastFreeByte - (u8 *)MEMPACK_ACTIVE->firstFreeByte))
+	{
+#ifdef CTR_NATIVE
+		Platform_LogError("[load] invalid credits text or insufficient memory\n");
+#endif
+		return;
+	}
+	i = 0;
 	CS_CREDITS_ALL_BLUE = 1;
 	for (; i < CS_CREDITS_RELIC_TRACK_COUNT; i++)
 	{
@@ -163,18 +218,19 @@ void CS_Credits_Init(void)
 	}
 	// NOTE(aalhendi): Walk the serialized size/count words before relocating
 	// the string offsets. Byte access keeps the shared path alias-safe.
-	creditsData = (u8 *)(ST1_GETPOINTERS(GAME_TRACKER->level1->ptrSpawnType1))[ST1_CREDITS];
 	CS_CREDITS_DANCER = NULL;
-	creditsDst = MEMPACK_AllocHighMem(CTR_ReadU32AlignedLE(creditsData), csCreditsNames.creditStrings);
-	memcpy(creditsDst, creditsData, ((struct CreditsLevHeader *)creditsData)->size);
+	creditsDst = MEMPACK_AllocHighMem(creditsSize, csCreditsNames.creditStrings);
+	memcpy(creditsDst, creditsData, creditsSize);
+	creditsDst->size = creditsSize;
+	creditsDst->numStrings = creditsCount;
 	creditsData = (u8 *)creditsDst;
 	creditsData += sizeof(u32);
-	CS_CREDITS_STRING_COUNT = CTR_ReadU16AlignedLE(creditsData);
+	CS_CREDITS_STRING_COUNT = creditsCount;
 	creditsData += sizeof(u32);
 	CS_CREDITS_STRINGS = (char **)creditsData;
 	for (i = 0; i < CS_CREDITS_STRING_COUNT; i++)
 	{
-		CTR_WriteU32AlignedLE(creditsData, (u32)creditsDst + CTR_ReadU32AlignedLE(creditsData));
+		*(u32 *)(void *)creditsData = (u32)creditsDst + CTR_ReadU32AlignedLE(creditsData);
 		creditsData += sizeof(u32);
 	}
 	creditsObj->creditsPosY = CS_CREDITS_NAME_START_Y;
@@ -370,17 +426,7 @@ void CS_Credits_DrawNames(struct CreditsObj *co)
 				colorSlot = CREDITS_FADE;
 				for (i = 0; i < 4; i++)
 				{
-					u8 *dst = (u8 *)&CS_CREDITS_FADE_PALETTE[i];
-					u8 *src;
-					src = (u8 *)CS_COLOR_POINTERS[charId];
-					src += i * 4;
-					dst[0] = src[0] * fadeAmount >> 8;
-					src = (u8 *)CS_COLOR_POINTERS[charId];
-					src += i * 4;
-					dst[1] = src[1] * fadeAmount >> 8;
-					src = (u8 *)CS_COLOR_POINTERS[charId];
-					src += i * 4;
-					dst[2] = src[2] * fadeAmount >> 8;
+					CS_CREDITS_FADE_PALETTE[i] = CS_Credits_FadeColor(((u32 *)CS_COLOR_POINTERS[charId])[i], fadeAmount);
 				}
 			}
 		}
@@ -423,17 +469,7 @@ void CS_Credits_DrawEpilogue(struct CreditsObj *co)
 
 			for (i = 0; i < 4; i++)
 			{
-				u8 *dst = (u8 *)&CS_CREDITS_FADE_PALETTE[i];
-				u8 *src;
-				src = (u8 *)CS_COLOR_POINTERS[WHITE];
-				src += i * 4;
-				dst[0] = src[0] * fadeAmount >> 8;
-				src = (u8 *)CS_COLOR_POINTERS[WHITE];
-				src += i * 4;
-				dst[1] = src[1] * fadeAmount >> 8;
-				src = (u8 *)CS_COLOR_POINTERS[WHITE];
-				src += i * 4;
-				dst[2] = src[2] * fadeAmount >> 8;
+				CS_CREDITS_FADE_PALETTE[i] = CS_Credits_FadeColor(((u32 *)CS_COLOR_POINTERS[WHITE])[i], fadeAmount);
 			}
 		}
 	}

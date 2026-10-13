@@ -138,7 +138,7 @@ CTR_STATIC_ASSERT(CTR_OFFSET_OF_ARRAY(struct TorchScratch, rings, 2) == TORCH_RI
 
 static u32 Torch_ReadWord(const void *base, int offset)
 {
-	return *(const u32 *)(const void *)((const char *)base + offset);
+	return CTR_ReadU32LE((const char *)base + offset);
 }
 
 static s32 Torch_ReadS32(const void *base, int offset)
@@ -153,7 +153,24 @@ static s8 Torch_ReadS8(const void *base, int offset)
 
 static u8 Torch_ReadU8(const void *base, int offset)
 {
-	return *(const u8 *)(const void *)((const char *)base + offset);
+	/* These callers select bits 8..15 of a runtime fixed-point axis. */
+	return (u8)((u32)Torch_ReadS32(base, offset - 1) >> 8);
+}
+
+static u32 Torch_Uv0Word(const struct TorchScratch *scratch)
+{
+	return scratch->uv0.u | ((u32)scratch->uv0.v << 8) | ((u32)scratch->uv0.clut << 16);
+}
+
+static u32 Torch_Uv1Word(const struct TorchScratch *scratch)
+{
+	return scratch->uv1.u | ((u32)scratch->uv1.v << 8) | ((u32)scratch->uv1.tpage << 16);
+}
+
+static u32 Torch_Uv23Word(const struct TorchScratch *scratch)
+{
+	return scratch->uv23.u0 | ((u32)scratch->uv23.v0 << 8) |
+	       ((u32)scratch->uv23.u1 << 16) | ((u32)scratch->uv23.v1 << 24);
 }
 
 static struct TorchScratch *Torch_Scratch(void)
@@ -307,11 +324,11 @@ static u32 *Torch_EmitFT3(u32 *prim, u32 *ot, struct TorchPointSource uv0, struc
 
 	CtrGpu_WriteColorCode(&poly->r0, scratch->color | 0x24000000);
 	CtrGpu_WritePackedXY(&poly->x0, Torch_ReadRingPointWord(xy0));
-	CtrGpu_WritePackedUVWord(&poly->u0, scratch->uv0.word);
+	CtrGpu_WritePackedUVWord(&poly->u0, Torch_Uv0Word(scratch));
 	CtrGpu_WritePackedXY(&poly->x1, Torch_ReadRingPointWord(xy1));
-	CtrGpu_WritePackedUVWord(&poly->u1, scratch->uv1.word);
+	CtrGpu_WritePackedUVWord(&poly->u1, Torch_Uv1Word(scratch));
 	CtrGpu_WritePackedXY(&poly->x2, Torch_ReadRingPointWord(xy2));
-	CtrGpu_WritePackedUVWord(&poly->u2, scratch->uv23.word);
+	CtrGpu_WritePackedUVWord(&poly->u2, Torch_Uv23Word(scratch));
 	Torch_LinkPrimitive(&poly->tag, poly, ot, 0x07000000);
 
 	return (u32 *)(poly + 1);
@@ -329,13 +346,13 @@ static u32 *Torch_EmitFT4(u32 *prim, u32 *ot, struct TorchPointSource uv0, struc
 	Torch_WriteUvPair(TORCH_UV_SLOT_1, uv1);
 	Torch_WriteUvPair(TORCH_UV_SLOT_2, uv2);
 	Torch_WriteUvPair(TORCH_UV_SLOT_3, uv3);
-	uv23 = scratch->uv23.word;
+	uv23 = Torch_Uv23Word(scratch);
 
 	CtrGpu_WriteColorCode(&poly->r0, scratch->color | 0x2c000000);
 	CtrGpu_WritePackedXY(&poly->x0, Torch_ReadRingPointWord(xy0));
-	CtrGpu_WritePackedUVWord(&poly->u0, scratch->uv0.word);
+	CtrGpu_WritePackedUVWord(&poly->u0, Torch_Uv0Word(scratch));
 	CtrGpu_WritePackedXY(&poly->x1, Torch_ReadRingPointWord(xy1));
-	CtrGpu_WritePackedUVWord(&poly->u1, scratch->uv1.word);
+	CtrGpu_WritePackedUVWord(&poly->u1, Torch_Uv1Word(scratch));
 	CtrGpu_WritePackedXY(&poly->x2, Torch_ReadRingPointWord(xy2));
 	CtrGpu_WritePackedUVWord(&poly->u2, uv23);
 	CtrGpu_WritePackedXY(&poly->x3, Torch_ReadRingPointWord(xy3));
@@ -526,7 +543,7 @@ void Torch_Main(void *particleList_heatWarp, struct PushBuffer *pb, struct PrimM
 			scratch->maxX = (u16)(pb->rect.w - 1);
 			scratch->maxY = (u16)(pb->rect.h - 1);
 
-			screenSize = Torch_ReadWord(pb, 0x20);
+			screenSize = CTR_PackS16Pair(pb->rect.w, pb->rect.h);
 			otBase = pb->ptrOT;
 			particle = firstParticle;
 
@@ -620,6 +637,8 @@ void Torch_Main(void *particleList_heatWarp, struct PushBuffer *pb, struct PrimM
 							sxy1 = MFC2(13);
 							card = Torch_Subset1_BuildCard(centerX, centerY, sxy0, sxy1);
 							Torch_Subset2_StoreCard(&card, centerX, centerY, TORCH_RING_2);
+							if (!CtrGpu_PrimFits(prim, primMem->guardEnd, 8 * sizeof(POLY_FT3) + 8 * sizeof(POLY_FT4)))
+								goto done;
 							prim = Torch_EmitParticle(prim, ot);
 						}
 					}

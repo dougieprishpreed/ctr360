@@ -15,6 +15,14 @@ void LOAD_StringToUpper(char *path)
 
 #ifdef CTR_NATIVE
 #include <platform/native_cd.h>
+#include <platform/native_log.h>
+#include <stdlib.h>
+static void LOAD_NativeReadFailure(int file, const char *reason)
+{
+	Platform_LogError("[load] file=%d cannot be loaded: %s; stopping before relocation\n", file, reason);
+	Platform_LogFlush();
+	exit(EXIT_FAILURE);
+}
 #endif
 
 int LOAD_InitCDvol(void)
@@ -319,6 +327,12 @@ void *LOAD_ReadFile_ex(struct BigHeader *bigfile, u32 loadType, int subfileIndex
 	int sectorSize;
 	int sectorCount;
 	int readComplete;
+#if defined(CTR_NATIVE)
+	int attempts = 0;
+	struct Mempack *allocationPack = MEMPACK_ACTIVE;
+	void *allocationStart = allocationPack->firstFreeByte;
+	s32 previousSize = allocationPack->sizeOfPrevAllocation;
+#endif
 
 	(void)loadType;
 	CDSYS_SetMode_StreamData();
@@ -330,12 +344,19 @@ void *LOAD_ReadFile_ex(struct BigHeader *bigfile, u32 loadType, int subfileIndex
 	{
 		bigfile = sdata->ptrBigfile1;
 	}
+	if (bigfile == NULL || sizePtr == NULL || subfileIndex < 0 || subfileIndex >= bigfile->numEntry)
+		LOAD_NativeReadFailure(subfileIndex, "invalid directory entry");
 #endif
 
 	// get size and offset of subfile
 	struct BigEntry *entry = BIG_GETENTRY(bigfile);
 	int eSize = entry[subfileIndex].size;
 	int eOffs = entry[subfileIndex].offset;
+#if defined(CTR_NATIVE)
+	if (eSize < 0 || eSize > 0x7fffffff - LOAD_CD_DATA_SECTOR_ROUND_MASK || eOffs < 0 ||
+	    (u32)eOffs > 0xffffffu - ((u32)bigfile->cdpos & 0xffffffu))
+		LOAD_NativeReadFailure(subfileIndex, "invalid file extent");
+#endif
 
 	*sizePtr = eSize;
 
@@ -358,6 +379,10 @@ void *LOAD_ReadFile_ex(struct BigHeader *bigfile, u32 loadType, int subfileIndex
 		// allocate room for all sectors,
 		// remove alignment before next Read
 		sectorSize = sectorCount << LOAD_CD_DATA_SECTOR_SHIFT;
+#if defined(CTR_NATIVE)
+		if (sectorSize > MEMPACK_GetFreeBytes())
+			LOAD_NativeReadFailure(subfileIndex, "insufficient allocator space");
+#endif
 		ptrDst = (void *)MEMPACK_AllocMem(sectorSize, NULL); // "FILE"
 		if (ptrDst == NULL)
 		{
@@ -384,6 +409,36 @@ void *LOAD_ReadFile_ex(struct BigHeader *bigfile, u32 loadType, int subfileIndex
 	{
 		uVar5 = CdControl(CdlSetloc, (u8 *)&cdLoc, &paramOutput[0]);
 
+#if defined(CTR_NATIVE)
+		/* The native read is synchronous. Delay callbacks until a complete
+		 * attempt succeeds, keeping the same allocation through retries. */
+		CdReadCallback(NULL);
+		sdata->callbackCdReadSuccess = callback;
+		if (uVar5 != 0) uVar5 = CdRead(sectorCount, ptrDst, CdlModeSpeed);
+		readComplete = CdReadSync(0, NULL) == 0;
+		if (uVar5 != 0 && readComplete)
+		{
+			if (callback != NULL) LOAD_ReadFileASyncCallback(CdlComplete, NULL);
+			break;
+		}
+		if (++attempts >= 3)
+		{
+			if (originalDst == NULL)
+			{
+				allocationPack->firstFreeByte = allocationStart;
+				allocationPack->sizeOfPrevAllocation = previousSize;
+			}
+			*sizePtr = 0;
+			lqs->ptrDestination = NULL;
+			Platform_LogError("[load] disc read failed file=%d sector=%d bytes=%d after %d attempts; stopping before relocation\n",
+			                  subfileIndex, eOffs, eSize, attempts);
+			Platform_LogFlush();
+			/* No caller can safely resume a half-replaced level. A controlled
+			 * process exit returns to the launcher instead of using its bytes. */
+			exit(EXIT_FAILURE);
+			return NULL;
+		}
+#else
 		if (callback != NULL)
 		{
 			sdata->callbackCdReadSuccess = callback;
@@ -408,6 +463,7 @@ void *LOAD_ReadFile_ex(struct BigHeader *bigfile, u32 loadType, int subfileIndex
 		{
 			break;
 		}
+#endif
 	}
 
 	if ((callback == NULL) && (originalDst == NULL))

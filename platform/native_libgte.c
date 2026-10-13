@@ -130,7 +130,13 @@ void PopMatrix()
 
 void RotTrans(SVECTOR *v0, VECTOR *v1, s32 *flag)
 {
-	gte_RotTrans(v0, v1, flag);
+	MTC2(CTR_PackS16Pair(v0->vx, v0->vy), 0);
+	MTC2((s32)v0->vz, 1);
+	gte_rt();
+	v1->vx = MFC2_S(25);
+	v1->vy = MFC2_S(26);
+	v1->vz = MFC2_S(27);
+	*flag = CFC2(31);
 }
 
 void RotTransSV(SVECTOR *v0, SVECTOR *v1, s32 *flag)

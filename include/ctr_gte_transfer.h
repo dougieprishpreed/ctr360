@@ -102,7 +102,11 @@ static inline void CTR_GteLoadPositionV0(const SVec4 *worldPosition)
 
 static inline void CTR_GteStorePositionXY(s16 *screenPosition)
 {
+#ifdef CTR_NATIVE
+	CTR_GteStoreSXYWord(screenPosition, (u32)MFC2(14));
+#else
 	CTR_PSX_STORE_COP2_WORD(screenPosition, 14);
+#endif
 }
 
 // Three packed words: V0 XY, V1 XY, and their shared signed Z coordinate.
@@ -110,10 +114,10 @@ static inline void CTR_GteStorePositionXY(s16 *screenPosition)
 #define CTR_GteLoadLineV0V1(line)                       \
 	do                                                  \
 	{                                                   \
-		MTC2(CTR_ReadU32LE((const u8 *)(line)), 0);     \
-		MTC2(CTR_ReadU32LE((const u8 *)(line) + 8), 1); \
-		MTC2(CTR_ReadU32LE((const u8 *)(line) + 4), 2); \
-		MTC2(CTR_ReadU32LE((const u8 *)(line) + 8), 3); \
+		MTC2(((const u32 *)(line))[0], 0); \
+		MTC2(((const u32 *)(line))[2], 1); \
+		MTC2(((const u32 *)(line))[1], 2); \
+		MTC2(((const u32 *)(line))[2], 3); \
 	} while (0)
 #else
 // NOTE(aalhendi): The transfer reads all three words, independently of the
@@ -133,8 +137,8 @@ static inline void CTR_GteStorePositionXY(s16 *screenPosition)
 static inline void CTR_GteStoreLineXY(void *screenPositions)
 {
 #ifdef CTR_NATIVE
-	CTR_WriteU32LE(screenPositions, (u32)MFC2(12));
-	CTR_WriteU32LE((u8 *)screenPositions + 4, (u32)MFC2(13));
+	CTR_GteStoreSXYWord(screenPositions, (u32)MFC2(12));
+	CTR_GteStoreSXYWord((u8 *)screenPositions + 4, (u32)MFC2(13));
 #else
 	__asm__ volatile("swc2 $12,0(%0)\n\tswc2 $13,4(%0)" : : "r"(screenPositions) : "memory");
 #endif

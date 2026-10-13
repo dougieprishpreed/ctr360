@@ -4,7 +4,9 @@ A native Xbox 360 port of **Crash Team Racing**, based on [CTR Native](https://g
 
 CTR360 runs the game from your own PlayStation disc dump. It includes 1280×720 rendering, an expanded 16:9 view, texture filtering, edge smoothing, controller input, audio, and persistent saves. Single-player races target 60 FPS rendering while keeping the original 30 Hz game simulation. Adventure hubs, menus, and other modes retain their normal cadence.
 
-This is a development build. It has been played on real Xbox 360 hardware, including Adventure mode and saving/loading, but performance, graphics, and stability issues can remain. The latest fixes for race-end stutters, wheel-rendering crashes, and Adventure hub transitions still need further console testing; a locked 60 FPS is not guaranteed.
+This is a development build. It has been played on real Xbox 360 hardware, including Adventure mode and saving/loading. The race-end stall has been resolved in console testing, but performance, graphics, and stability issues can remain; a locked 60 FPS is not guaranteed.
+
+The latest update repairs additional effects, ghosts, menus, and asset byte order, adds safer loading and graphics-buffer handling, and spreads race-end audio preparation across loading frames. It also guards repeated Adventure hub preloads. These new changes have passed build and host regression checks and still need console testing, especially entering the unlocked door to the second Adventure hub: an earlier build shut down the console at that transition.
 
 ## What you need
 
@@ -76,7 +78,7 @@ python tools/ctr360/cook_disc.py \
   --out "$CTR360_ROOT/build-360/ctr-u-360.bin"
 ```
 
-The cooker writes a separate converted copy and runs model and level byte-order audits. Keep the original dump. Only proceed after cooking and both audits finish successfully. Re-run the cooker when updating to a version that changes asset conversion.
+The cooker writes a separate converted copy and runs model and level byte-order audits. Keep the original dump. Only proceed after cooking and both audits finish successfully. Re-run the cooker when updating to a version that changes asset conversion. **This update requires a freshly converted image** because it changes built-in ghosts, font assets, and battle-level icon handling. Always convert the original dump; do not convert an already converted image.
 
 ### 5. Create the console folder
 
@@ -120,7 +122,7 @@ Use CTR's normal save/load menus. CTR360 creates its own virtual memory-card fil
 
 ## Updating
 
-When rebuilding after a source update, regenerate the mirror and repeat the build and staging steps. The release staging tool preserves the existing `build-360/releases/ctr360/memcards` folder and personal graphics settings.
+When rebuilding after a source update, regenerate the mirror, compile the executable, prepare the disc image with the current cooker, and repeat the staging steps. Keep the executable and converted assets from the same source version. The release staging tool preserves the existing `build-360/releases/ctr360/memcards` folder and personal graphics settings.
 
 On your console, replace the executable and supplied assets while **keeping your existing `memcards/` folder** and `assets/ctr360_graphics.txt`, if present. Do not delete the old game folder before copying an update unless you have backed up its saves.
 
@@ -160,4 +162,4 @@ For optional Xenia Canary testing, launch the staged XEX with `--allow_game_rela
 
 Thanks to CTR Native, the CTR-ModSDK contributors, PsyCross/Psy-X, and PSn00bSDK. See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the source license and component notices. Crash Team Racing and its original assets belong to their respective owners.
 
-This repository focuses on the Xbox 360 target. Inherited PC platform sources and development notes are included for reference; the large PC/PSX toolchain bundles are omitted. For the upstream PC build and its dependencies, see [CTR Native](https://github.com/CTR-tools/ctr-native).
+This repository focuses on the Xbox 360 target. Inherited PC platform sources are included; the large PC/PSX toolchain bundles are omitted. For the upstream PC build and its dependencies, see [CTR Native](https://github.com/CTR-tools/ctr-native).

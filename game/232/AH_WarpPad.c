@@ -1046,7 +1046,7 @@ void AH_WarpPad_LInB(struct Instance *inst)
 		// NOTE(aalhendi): The five color counts follow total. Read through the
 		// owning struct's bytes instead of indexing past its scalar red member.
 		arrTokenCount = (const u8 *)&GAME_TRACKER->currAdvProfile.numCtrTokens;
-		unlockItem_numOwned = (s32)CTR_ReadU32AlignedLE(arrTokenCount + sizeof(s32) + (s16)(warppadObj->levelID - AH_WP_ID_FIRST_GEM_CUP) * sizeof(s32));
+		unlockItem_numOwned = *(const s32 *)(arrTokenCount + sizeof(s32) + (s16)(warppadObj->levelID - AH_WP_ID_FIRST_GEM_CUP) * sizeof(s32));
 	}
 
 

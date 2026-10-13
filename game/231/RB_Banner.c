@@ -44,7 +44,7 @@ int RB_Banner_Animate_Init(struct ModelHeader *mh)
 	s16 count = 0;
 	u8 *vertex = RB_Banner_FirstVertex(mh);
 	u32 *cmd = (u32 *)mh->ptrCommandList;
-	u16 numColors = CTR_ReadU16AlignedLE(cmd);
+	u16 numColors = (u16)*cmd;
 
 	cmd++;
 	if ((s16)numColors < 0x40)
@@ -152,7 +152,7 @@ void RB_Banner_Animate_Play(struct ModelHeader *mh, s16 numVertices)
 
 	for (i = 0; i < 0x3f; i++)
 	{
-		*palette++ = CTR_ReadU32AlignedLE(cursor);
+		*palette++ = *(u32 *)cursor;
 		cursor += 4;
 	}
 	*palette = firstColor;
@@ -164,7 +164,7 @@ void RB_Banner_Animate_Play(struct ModelHeader *mh, s16 numVertices)
 	for (; (u32)cursor < end; cursor += 3)
 	{
 		s16 x = cursor[0];
-		u8 color = ((u8 *)colors)[(((x >> 2) + 10) & 0x3f) * 4];
+		u8 color = (u8)colors[((x >> 2) + 10) & 0x3f];
 		s32 wave = (s32)color - 0x80;
 		s32 factor;
 		b32 nearLeftPole = x < 0x40;

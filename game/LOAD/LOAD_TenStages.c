@@ -726,8 +726,9 @@ int LOAD_TenStages(struct GameTracker *gGT, int loadingStage, struct BigHeader *
 		// USB/HDD synchronously when the player crosses the finish line.
 		if (LOAD_IsOpen_RacingOrBattle() && gGT->numPlyrCurrGame != 0)
 		{
-			if (!NativeAudio_PreloadXATrack(CDSYS_XA_TYPE_MUSIC, 4) ||
-			    !NativeAudio_PreloadXATrack(CDSYS_XA_TYPE_MUSIC, 5))
+			int preload = NativeAudio_PreloadRaceEndStep(CDSYS_XA_TYPE_MUSIC);
+			if (preload == 0) return loadingStage;
+			if (preload < 0)
 			{
 				Platform_LogWarn("[load] XA race-end preload unavailable; playback will use the disc\n");
 			}

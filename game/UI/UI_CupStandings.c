@@ -444,7 +444,9 @@ void UI_CupStandings_InputAndDraw(void)
 				}
 			}
 
-			*(int *)&text[0] = '+' + (('0' + awardedPoints) << 8);
+			text[0] = '+';
+			text[1] = '0' + awardedPoints;
+			text[2] = 0;
 		}
 
 		// if this is not the first page,

@@ -2740,9 +2740,13 @@ def hoist_unit_worker(payload):
     return unit, results, None
 
 def run_hoist_pass(out, hunits, ctx, clang, log):
-    """Hoist pass: function-less units skipped, unit work done in a process
-    pool, edits applied sequentially in the parent."""
-    from concurrent.futures import ProcessPoolExecutor
+    """Hoist units on one worker; apply edits sequentially in the parent.
+
+    A single thread preserves ordering and avoids Windows named-process pipes,
+    which are unavailable in restricted build environments. Each unit creates
+    its own AST/context; no context is shared with the writer.
+    """
+    from concurrent.futures import ThreadPoolExecutor
 
     def any_functions(rels):
         for r_ in rels:
@@ -2780,7 +2784,7 @@ def run_hoist_pass(out, hunits, ctx, clang, log):
     manual = []
     done = 0
     payloads = [(u, fl, out, clang) for u, fl in items]
-    with ProcessPoolExecutor(max_workers=1) as ex:
+    with ThreadPoolExecutor(max_workers=1) as ex:
         for unit, results, err in ex.map(hoist_unit_worker, payloads):
             done += 1
             if done % 25 == 0:
@@ -2844,6 +2848,8 @@ def resume_hoist_only(out, args, log):
     if args.verify_syntax:
         bad = run_verify(out, sorted(hunits), args.clang, log)
         log("unit verify: %d failure(s)" % bad)
+        if bad:
+            raise RuntimeError("host syntax verification failed; refusing to publish mirror manifest")
     wrapper = os.path.join(out, "game", "_unit233.c")
     if os.path.exists(wrapper):
         os.remove(wrapper)

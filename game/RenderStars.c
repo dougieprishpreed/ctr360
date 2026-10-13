@@ -67,6 +67,8 @@ void RenderStars(struct PushBuffer *pb, struct PrimMem *primMem, struct Stars *s
 
 	for (int playerIndex = playerCount - 1; playerIndex >= 0; playerIndex--, pb++)
 	{
+		if (!CtrGpu_PrimFits(prim, primMem->guardEnd, sizeof(struct CtrGpuDrawModePacket)))
+			break;
 		s32 starIndex;
 		u32 state0;
 		u32 state1;
@@ -157,6 +159,11 @@ void RenderStars(struct PushBuffer *pb, struct PrimMem *primMem, struct Stars *s
 				absZ = oldAbsX;
 			}
 
+			if (absX + (absY >> 2) + (absZ >> 2) == 0)
+			{
+				starIndex--;
+				continue;
+			}
 			scale = 0x01000000 / (absX + (absY >> 2) + (absZ >> 2));
 
 			packedXY = (u32)(RenderStars_MulLowShift(starX, scale) & 0xffff);
@@ -176,6 +183,8 @@ void RenderStars(struct PushBuffer *pb, struct PrimMem *primMem, struct Stars *s
 
 			if (RenderStars_IsVisible(gteFlag, sxy))
 			{
+				if (!CtrGpu_PrimFits(prim, primMem->guardEnd, sizeof(TILE_1) + sizeof(struct CtrGpuDrawModePacket)))
+					break;
 				TILE_1 *star = (TILE_1 *)prim;
 
 				CtrGpu_WriteColorCode(&star->r0, color);

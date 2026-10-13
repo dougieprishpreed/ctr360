@@ -19,7 +19,7 @@ CTR_STATIC_ASSERT(offsetof(LINE_G2, x1) == 0x10);
 
 static u32 RedBeaker_ReadWord(const void *base, int offset)
 {
-	return *(const u32 *)(const void *)((const char *)base + offset);
+	return CTR_ReadU32LE((const char *)base + offset);
 }
 
 static s16 RedBeaker_ReadS16(const void *base, int offset)
@@ -101,14 +101,16 @@ static void RedBeaker_EmitDrawMode(u32 **primCursor, u32 *ot, u32 drawMode)
 }
 
 static void RedBeaker_RenderPass(u32 **primCursor, u32 *ot, u32 color, u32 drawMode, s32 frameCount, u32 scrollXY, u32 nextScrollXY, s32 scrollZ,
-                                 s32 nextScrollZ, u32 spanXY, s32 spanZ, u32 screenBounds)
+                                 s32 nextScrollZ, u32 spanXY, s32 spanZ, u32 screenBounds, const void *guardEnd)
 {
 	u32 state0 = 0x30125400;
 	u32 state1 = 0x493583fe;
 	struct RedBeakerRng rng = RedBeaker_NextRng(&state0, &state1);
 	s32 remaining = frameCount;
 
-	while (remaining != 0)
+	if (!CtrGpu_PrimFits(*primCursor, guardEnd, sizeof(struct CtrGpuDrawModePacket)))
+		return;
+	while (remaining > 0)
 	{
 		u32 xy0;
 		u32 xy1;
@@ -154,6 +156,8 @@ static void RedBeaker_RenderPass(u32 **primCursor, u32 *ot, u32 color, u32 drawM
 
 				if (RedBeaker_IsVisible(gteFlag, sxy0, sxy1, screenBounds))
 				{
+					if (!CtrGpu_PrimFits(*primCursor, guardEnd, sizeof(LINE_G2) + sizeof(struct CtrGpuDrawModePacket)))
+						break;
 					RedBeaker_EmitLine(primCursor, ot, color);
 				}
 			}
@@ -212,7 +216,7 @@ void RedBeaker_RenderRain(struct PushBuffer *pb, struct PrimMem *primMem, struct
 		CTC2((u32)(s32)pb->rect.h << 15, 25);
 		CTC2((u32)pb->distanceToScreen_PREV, 26);
 
-		screenBounds = RedBeaker_ReadWord(pb, 0x20);
+		screenBounds = CTR_PackS16Pair(pb->rect.w, pb->rect.h);
 		otBase = pb->ptrOT;
 		playerOffset = playerIndex * sizeof(struct InstDrawPerPlayer);
 
@@ -245,7 +249,8 @@ void RedBeaker_RenderRain(struct PushBuffer *pb, struct PrimMem *primMem, struct
 
 			if (gameMode1 == 0)
 			{
-				CTR_WriteU32LE(&rainLocal->scroll.x, nextScrollXY);
+				rainLocal->scroll.x = (s16)nextScrollXY;
+				rainLocal->scroll.y = (s16)(nextScrollXY >> 16);
 				rainLocal->scroll.z = (s16)nextScrollZ;
 			}
 
@@ -291,9 +296,9 @@ void RedBeaker_RenderRain(struct PushBuffer *pb, struct PrimMem *primMem, struct
 			ot = (u32 *)(void *)((char *)otBase + otOffset);
 
 			RedBeaker_RenderPass(&prim, ot, scratch->colorTop, 0xe1000a20, rainLocal->frameCount, scrollXY, nextScrollXY, scrollZ, nextScrollZ, velocityXY,
-			                     velocityZ, screenBounds);
+			                     velocityZ, screenBounds, primMem->guardEnd);
 			RedBeaker_RenderPass(&prim, ot, scratch->colorBottom, 0xe1000a40, rainLocal->frameCount, scrollXY, nextScrollXY, scrollZ, nextScrollZ, velocityXY,
-			                     velocityZ, screenBounds);
+			                     velocityZ, screenBounds, primMem->guardEnd);
 		}
 	}
 

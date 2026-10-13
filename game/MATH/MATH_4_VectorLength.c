@@ -2,7 +2,7 @@
 
 s32 MATH_VectorLength(SVec3 *vector)
 {
-	u32 xy = CTR_ReadU32LE(&vector->x);
+	u32 xy = CTR_PackS16Pair(vector->x, vector->y);
 	s32 z = vector->z;
 
 	CTC2(xy, 0);

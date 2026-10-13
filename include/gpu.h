@@ -54,6 +54,14 @@ static inline u32 CtrGpu_PackColorCode(u32 color, u32 code)
 	return (color & 0xffffff) | (code << 24);
 }
 
+/* Reserve a complete packet/batch before writing or linking any of it. */
+static inline int CtrGpu_PrimFits(const void *cursor, const void *guardEnd, u32 bytes)
+{
+	const u8 *begin = (const u8 *)cursor;
+	const u8 *end = (const u8 *)guardEnd;
+	return begin != NULL && end != NULL && begin <= end && bytes <= (u32)(end - begin);
+}
+
 static inline void CtrGpu_WriteColorCode(u8 *r, u32 colorCode)
 {
 #ifdef CTR_NATIVE

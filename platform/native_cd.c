@@ -39,6 +39,7 @@ global_variable struct NativeCDOpenFile s_nativeCdFiles[NATIVE_CD_MAX_OPEN_FILES
 global_variable s32 s_nativeCdFileCount;
 global_variable s32 s_nativeCdCurrentFile;
 global_variable s32 s_nativeCdCurrentSector;
+global_variable s32 s_nativeCdReadError;
 
 int boolDecodeXaDuringVsyncCallback;
 
@@ -205,6 +206,7 @@ internal s32 NativeCD_SetLoc(const CdlLOC *pos)
 
 	if ((fileIndex < 0) || (fileIndex >= s_nativeCdFileCount) || (s_nativeCdFiles[fileIndex].source == NATIVE_CD_FILE_NONE))
 	{
+		s_nativeCdCurrentFile = -1;
 		return 0;
 	}
 
@@ -221,12 +223,14 @@ internal s32 NativeCD_SetLoc(const CdlLOC *pos)
 
 internal s32 NativeCD_ReadSectors(s32 sectors, void *dst)
 {
-	if ((s_nativeCdCurrentFile < 0) || (s_nativeCdCurrentFile >= s_nativeCdFileCount) || (s_nativeCdFiles[s_nativeCdCurrentFile].source == NATIVE_CD_FILE_NONE))
+	if (sectors < 0 || sectors > 0x7fffffff / NATIVE_CD_SECTOR_SIZE || (sectors != 0 && dst == NULL) ||
+	    (s_nativeCdCurrentFile < 0) || (s_nativeCdCurrentFile >= s_nativeCdFileCount) || (s_nativeCdFiles[s_nativeCdCurrentFile].source == NATIVE_CD_FILE_NONE))
 	{
 		return 0;
 	}
 
 	size_t byteCount = (size_t)sectors * NATIVE_CD_SECTOR_SIZE;
+	if (sectors == 0) return 1;
 
 	if (s_nativeCdFiles[s_nativeCdCurrentFile].source == NATIVE_CD_FILE_DISC)
 	{
@@ -239,7 +243,9 @@ internal s32 NativeCD_ReadSectors(s32 sectors, void *dst)
 		return 1;
 	}
 
-	return fread(dst, 1, byteCount, s_nativeCdFiles[s_nativeCdCurrentFile].hostFile) == byteCount;
+	if (fread(dst, 1, byteCount, s_nativeCdFiles[s_nativeCdCurrentFile].hostFile) != byteCount) return 0;
+	s_nativeCdCurrentSector += sectors;
+	return 1;
 }
 
 internal void NativeCD_SetLastCom(int com)
@@ -266,6 +272,7 @@ int NativeCD_Init(void)
 	s_nativeCdFileCount = 0;
 	s_nativeCdCurrentFile = -1;
 	s_nativeCdCurrentSector = 0;
+	s_nativeCdReadError = 0;
 	memset(s_cdSectorData, 0, sizeof(s_cdSectorData));
 	return 0;
 }
@@ -356,9 +363,12 @@ int CdControl(u8 com, u8 *param, u8 *result)
 
 	NativeCD_SetLastCom(com);
 
-	if ((com == CdlSetloc) && (param != NULL))
+	if (com == CdlSetloc)
 	{
-		NativeCD_SetLoc((const CdlLOC *)param);
+		int success = param != NULL && NativeCD_SetLoc((const CdlLOC *)param);
+		if (!success) s_nativeCdCurrentFile = -1;
+		s_nativeCdReadError = !success;
+		return success;
 	}
 
 	if ((com == CdlSetmode) && (param != NULL))
@@ -381,14 +391,15 @@ int CdRead(int sectors, u32 *buf, int mode)
 {
 	(void)mode;
 
-	NativeCD_ReadSectors(sectors, buf);
+	int success = NativeCD_ReadSectors(sectors, buf);
+	s_nativeCdReadError = !success;
 
 	if (s_nativeCdReadCallback != 0)
 	{
-		s_nativeCdReadCallback(CdlComplete, 0);
+		s_nativeCdReadCallback(success ? CdlComplete : CdlDiskError, 0);
 	}
 
-	return 1;
+	return success;
 }
 
 int CdReadSync(int mode, u8 *result)
@@ -396,5 +407,5 @@ int CdReadSync(int mode, u8 *result)
 	(void)mode;
 	(void)result;
 
-	return 0;
+	return s_nativeCdReadError ? -1 : 0;
 }

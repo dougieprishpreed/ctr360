@@ -276,6 +276,20 @@ struct NativeAudioXaCacheEntry
 static struct NativeAudioXaCacheEntry s_xaCache[NATIVE_AUDIO_XA_CACHE_SLOTS];
 static size_t s_xaCacheBytes;
 
+/* Preparation advances only on the game thread, never in the audio worker. */
+struct NativeAudioXaPreloadJob
+{
+ int state; /* 0 idle, 1 scanning, 2 complete, -1 failed */
+ int categoryID;
+ int nextSector;
+ int capacity[2];
+ int channel[2];
+ int limits[2];
+ struct NativeAudioXaSource source;
+ struct NativeAudioXaPreparedStream prepared[2];
+};
+static struct NativeAudioXaPreloadJob s_xaPreloadJob;
+
 // Compressed XA sectors stay resident while their PCM is decoded through a
 // small ring. This keeps file I/O out of SDL's audio callback without bringing
 // back whole-track decoded PCM caches.
@@ -2141,8 +2155,97 @@ internal int NativeAudio_FindCachedXA(int categoryID, int xaID)
 	return -1;
 }
 
+internal void NativeAudio_CancelXAPreload(void)
+{
+ NativeAudio_XaSourceClose(&s_xaPreloadJob.source);
+ for (int i = 0; i < 2; i++) NativeAudio_XaPreparedStreamClose(&s_xaPreloadJob.prepared[i]);
+ memset(&s_xaPreloadJob, 0, sizeof(s_xaPreloadJob));
+}
+
+/* Scan the shared victory/defeat file once, in at most four read batches per
+ * loading frame. Return 0 while pending, 1 when resident, -1 on failure. */
+int NativeAudio_PreloadRaceEndStep(int categoryID)
+{
+ struct NativeAudioXaPreloadJob *job = &s_xaPreloadJob;
+ u8 sectorBuf[XA_FULL_SECTOR_SIZE];
+ if (NativeAudio_FindCachedXA(categoryID, 4) >= 0 && NativeAudio_FindCachedXA(categoryID, 5) >= 0) return 1;
+ if (job->state == -1) return -1;
+ if (job->state == 0)
+ {
+  struct NativeAudioXaTrackInfo info[2];
+  char path[128];
+  if (!NativeAudio_LookupXATrackInfo(categoryID, 4, &info[0]) ||
+      !NativeAudio_LookupXATrackInfo(categoryID, 5, &info[1]) || info[0].fileNumber != info[1].fileNumber ||
+      !NativeAudio_BuildXAPath(path, sizeof(path), categoryID, info[0].fileNumber) ||
+      !NativeAudio_XaSourceOpen(path, &job->source)) goto failed;
+  job->categoryID = categoryID;
+  for (int i = 0; i < 2; i++)
+  {
+   job->channel[i] = info[i].channelFilter;
+   job->limits[i] = info[i].numSectors < job->source.totalSectors ? info[i].numSectors : job->source.totalSectors;
+   if (job->limits[i] <= 0) goto failed;
+  }
+  job->source.readLimit = job->limits[0] > job->limits[1] ? job->limits[0] : job->limits[1];
+  job->state = 1;
+ }
+ if (job->categoryID != categoryID) goto failed;
+ for (int work = 0; work < NATIVE_AUDIO_XA_READ_BATCH * 4 && job->nextSector < job->source.readLimit; work++, job->nextSector++)
+ {
+  if (!NativeAudio_XaSourceReadSector(&job->source, job->nextSector, sectorBuf)) goto failed;
+  for (int i = 0; i < 2; i++)
+  {
+   struct NativeAudioXaPreparedStream *prepared = &job->prepared[i];
+   if (NativeAudio_FindCachedXA(categoryID, 4 + i) >= 0 || job->nextSector >= job->limits[i] ||
+       !NativeAudio_IsXAAudioSector(sectorBuf, job->source.sectorBase, job->channel[i])) continue;
+   if (prepared->sectorCount == job->capacity[i])
+   {
+    int capacity = job->capacity[i] + 256;
+    size_t reserved = (size_t)(capacity + job->capacity[1 - i]) * job->source.sectorSize;
+    u8 *grown;
+    if (reserved > NATIVE_AUDIO_XA_CACHE_BYTES - s_xaCacheBytes) goto failed;
+    grown = (u8 *)realloc(prepared->sectors, (size_t)capacity * job->source.sectorSize);
+    if (grown == NULL) goto failed;
+    prepared->sectors = grown;
+    job->capacity[i] = capacity;
+   }
+   memcpy(prepared->sectors + (size_t)prepared->sectorCount * job->source.sectorSize, sectorBuf, job->source.sectorSize);
+   prepared->sectorCount++;
+   prepared->sectorSize = job->source.sectorSize;
+   prepared->sectorBase = job->source.sectorBase;
+   prepared->sampleRate = (((sectorBuf[prepared->sectorBase + 3] >> 2) & 3) == 0) ? XA_SAMPLE_RATE_37800 : XA_SAMPLE_RATE_18900;
+   prepared->numChannels = (sectorBuf[prepared->sectorBase + 3] & 3) != 0 ? 2 : 1;
+  }
+ }
+ if (job->nextSector < job->source.readLimit) return 0;
+ for (int i = 0; i < 2; i++)
+ {
+  struct NativeAudioXaPreparedStream *prepared = &job->prepared[i];
+  int slot = -1;
+  if (NativeAudio_FindCachedXA(categoryID, 4 + i) >= 0) continue;
+  if (prepared->sectorCount <= 0) goto failed;
+  prepared->frameCount = prepared->sectorCount * ((prepared->numChannels == 2) ? XA_SECTOR_MAX_SAMPLES / 2 : XA_SECTOR_MAX_SAMPLES);
+  for (int j = 0; j < NATIVE_AUDIO_XA_CACHE_SLOTS; j++) if (!s_xaCache[j].valid) {slot = j; break;}
+  if (slot < 0) goto failed;
+  s_xaCache[slot].valid = 1;
+  s_xaCache[slot].categoryID = categoryID;
+  s_xaCache[slot].xaID = 4 + i;
+  s_xaCache[slot].prepared = *prepared;
+  s_xaCacheBytes += (size_t)prepared->sectorCount * prepared->sectorSize;
+  prepared->sectors = NULL;
+ }
+ NativeAudio_XaSourceClose(&job->source);
+ job->state = 2;
+ Platform_Log("[load] XA race-end cache ready: one scan, %d sectors, %u bytes\n", job->nextSector, (unsigned)s_xaCacheBytes);
+ return 1;
+failed:
+ NativeAudio_CancelXAPreload();
+ s_xaPreloadJob.state = -1;
+ return -1;
+}
+
 internal void NativeAudio_ClearXACache(void)
 {
+	NativeAudio_CancelXAPreload();
 	for (int i = 0; i < NATIVE_AUDIO_XA_CACHE_SLOTS; i++)
 	{
 		NativeAudio_XaPreparedStreamClose(&s_xaCache[i].prepared);

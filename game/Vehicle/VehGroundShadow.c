@@ -193,7 +193,11 @@ void VehGroundShadow_Main(void)
 				z = v0Value + x;
 				do
 				{
+#ifdef CTR_NATIVE
+					v1Value = (u8)((struct Instance *)x)->idpp[entryPlayerIndex].instFlags;
+#else
 					v1Value = VEH_GROUND_SHADOW_BYTE((u8 *)z, 0xb8);
+#endif
 					z -= sizeof(struct InstDrawPerPlayer);
 					v0Value = (size_t)entryBase + entryPlayerIndex;
 					entryPlayerIndex--;

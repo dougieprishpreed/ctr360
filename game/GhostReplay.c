@@ -335,6 +335,9 @@ void GhostReplay_Init1(void)
 	}
 
 	struct GhostHeader *gh = MEMPACK_AllocMem(0x3e00, NULL);
+	memset(gh, 0, sizeof(*gh));
+	gh->version = GHOST_TAPE_VERSION_RETAIL;
+	gh->levelID = gGT->levelID;
 	char *recordBuffer = GHOSTHEADER_GETRECORDBUFFER(gh);
 	sdata->GhostRecording.ptrGhost = gh;
 	sdata->GhostRecording.ptrStartOffset = &recordBuffer[0];
@@ -360,6 +363,11 @@ void GhostReplay_Init1(void)
 			gh = ((timeTrialFlags & TT_NTROPY_BEATEN) != 0) ? pointers[ST1_NOXIDE] : pointers[ST1_NTROPY];
 		}
 
+		/* No saved human tape is a normal fresh-boot state. Invalid headers
+		 * must not turn the serialized size into an arbitrary end pointer. */
+		if (gh == NULL || gh->version != GHOST_TAPE_VERSION_RETAIL || gh->size < 0 ||
+		    gh->size > GHOST_RECORD_BUFFER_SIZE - sizeof(struct GhostHeader) || gh->levelID != gGT->levelID)
+			gh = sdata->GhostRecording.ptrGhost;
 		recordBuffer = GHOSTHEADER_GETRECORDBUFFER(gh);
 
 		tape->gh = gh;

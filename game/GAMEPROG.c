@@ -208,7 +208,7 @@ b32 GAMEPROG_CheckGhostsBeaten(s32 ghostID)
 		{
 			trackOffset = GAME_TRACKER->levelID * (s32)sizeof(struct HighScoreTrack);
 			trackOffset = wordOffset + trackOffset;
-			trackBeaten = (CTR_ReadU32AlignedLE((u8 *)(trackOffset + (u32)progress) + OFFSETOF(struct GameProgress, highScoreTracks[0].timeTrialFlags)) >>
+			trackBeaten = (*(const u32 *)((u8 *)(trackOffset + (u32)progress) + OFFSETOF(struct GameProgress, highScoreTracks[0].timeTrialFlags)) >>
 			               (ghostBit & 0x1f)) &
 			              1;
 		}

@@ -362,9 +362,13 @@ void RB_Burst_DrawAll(struct GameTracker *gGT)
 
 			CTR_GteLoadPositionV0(&pos);
 			gte_rt();
+#ifdef CTR_NATIVE
+			CTR_GteStoreRuntimeMAC(&transformed.vx);
+#else
 			CTR_PSX_STORE_COP2_WORD(&transformed.vx, 25);
 			CTR_PSX_STORE_COP2_WORD(&transformed.vy, 26);
 			CTR_PSX_STORE_COP2_WORD(&transformed.vz, 27);
+#endif
 
 			distance.vx = abs(transformed.vx);
 			distance.vy = abs(transformed.vy);

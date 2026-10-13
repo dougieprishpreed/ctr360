@@ -26,13 +26,14 @@ enum {SCREENSPACE_INSTANCE=0x400,HIDE_MODEL=0x80};
 struct GameTracker {
  struct Level *level1;int numPlyrCurrGame,gameMode1,renderFlags,swapchainIndex;
  struct PushBuffer pushBuffer[1];struct DB db[2],*backBuffer;u32 *otSwapchainDB[2];
- struct {struct {struct {void *first;} taken;} instance;} JitPools;
+ struct {struct {struct {void *first;} taken;} instance;int rain;} JitPools;
+ struct {int numStars;} stars;int rainBuffer[1];
  int raceTimer,elapsedTimeMS,trafficLightsTimer,timer;void *visMem1;
  struct {struct Thread *thread;} threadBuckets[3];
 };
 static struct {struct {int stage;} Loading;} data,*sdata=&data;
 enum {LOAD_IDLE=0,LOADING=1,MAIN_MENU=2,GAME_CUTSCENE=4,ADVENTURE_ARENA=8,PAUSE_ALL=16,END_OF_RACE=32};
-enum {RENDER_FLAG_DRAW_LEVEL=1,RENDER_FLAG_RENDER_BUCKET=2,RENDER_FLAG_CLEAR_BACK_BUFFER=4,RENDER_FLAG_EFFECT_BUCKETS=8};
+enum {RENDER_FLAG_DRAW_LEVEL=1,RENDER_FLAG_RENDER_BUCKET=2,RENDER_FLAG_CLEAR_BACK_BUFFER=4,RENDER_FLAG_EFFECT_BUCKETS=8,RENDER_FLAG_RAIN=16,RENDER_FLAG_BEAKER_RAIN=32,RENDER_FLAG_STARS=64};
 static u16 CTR_ReadU16LE(const void*p){const u8*b=p;return b[0]|((u16)b[1]<<8);}
 static void CTR_WriteU16LE(void*p,u16 v){u8*b=p;b[0]=(u8)v;b[1]=(u8)(v>>8);}
 static int renders,vsyncs,captures,hudValid=1;
@@ -51,6 +52,11 @@ void PushBuffer_UpdateFrustum(struct PushBuffer*p){(void)p;}
 void MainFrame_VisMemFullFrame(struct GameTracker*g,struct Level*l){(void)g;(void)l;}
 void ClearOTagR(u32*p,int n){memset(p,0,n*sizeof(u32));}
 void RenderBucket_QueueAllInstances(struct GameTracker*g){(void)g;queuedRange++;flameRange=burstRange=blowupRange=0;assert((((struct Instance*)g->JitPools.instance.taken.first)->next->flags & HIDE_MODEL)!=0);}
+static int weatherDraws,cloudDraws,starDraws,heatDraws;
+void RenderWeather(struct PushBuffer*p,struct PrimMem*m,int*r,int n,int pause){assert(pause==PAUSE_ALL&&n==1);weatherDraws++;}
+void RedBeaker_RenderRain(struct PushBuffer*p,struct PrimMem*m,int*r,int n,int pause){assert(pause==PAUSE_ALL&&n==1);cloudDraws++;}
+void RenderStars(struct PushBuffer*p,struct PrimMem*m,void*r,int n){assert(n==1);starDraws++;}
+void RenderAllHeatParticles(struct GameTracker*g){heatDraws++;}
 void RenderAllNormalParticles(struct GameTracker*g){(void)g;}
 void RenderBucket_ExecuteAllInstances(struct GameTracker*g){(void)g;assert(flameRange==queuedRange && burstRange==queuedRange && blowupRange==queuedRange);}
 void RenderAllTires(struct GameTracker*g){((struct Instance*)g->JitPools.instance.taken.first)->flags=777;}
@@ -81,7 +87,7 @@ int main(void){
  assert(c.t[0]==0 && c.t[1]==0 && c.t[2]==-1 && c.pad==b.pad);
  for(i=0;i<9;i++){int av=(s16)CTR_ReadU16LE(&a.m[i/3][i%3]),bv=(s16)CTR_ReadU16LE(&b.m[i/3][i%3]);assert((s16)CTR_ReadU16LE(&c.m[i/3][i%3])==bv+(av-bv)/2);}
  assert(NativeHD_AngleMidpoint(4090,6)==0);assert(NativeHD_AngleMidpoint(6,4090)==0);
- g.level1=&level;g.numPlyrCurrGame=1;g.renderFlags=15;g.backBuffer=&g.db[0];g.otSwapchainDB[0]=ot;g.pushBuffer[0].ptrOT=ot+6;
+ g.level1=&level;g.numPlyrCurrGame=1;g.renderFlags=127;g.stars.numStars=12;g.backBuffer=&g.db[0];g.otSwapchainDB[0]=ot;g.pushBuffer[0].ptrOT=ot+6;
  g.db[0].primMem.start=prim;g.db[0].primMem.cursor=prim+12;g.db[0].otMem.start=mem;g.db[0].otMem.cursor=mem+24;
  g.JitPools.instance.taken.first=&inst;inst.next=&hud;hud.model=&model;hud.flags=SCREENSPACE_INSTANCE;hud.matrix.t[0]=123;inst.model=&model;inst.matrix=b;inst.matrix.t[0]=100;inst.matrix.t[1]=200;inst.matrix.t[2]=300;
  g.raceTimer=76543;g.elapsedTimeMS=32;observedGT=&g;
@@ -90,6 +96,7 @@ int main(void){
  g.pushBuffer[0].pos.x=100;inst.matrix.t[0]=120;
  before=g;matrixBefore=inst.matrix;memcpy(otBefore,ot,sizeof ot);
  NativeHD_RenderIntermediate(&g);
+ assert(weatherDraws==1 && cloudDraws==1 && starDraws==1 && heatDraws==1);
  assert(renders==1 && vsyncs==1 && observedCamera.x==50 && observedMatrix.t[0]==110);
  assert(memcmp(&g,&before,sizeof g)==0 && memcmp(&inst.matrix,&matrixBefore,sizeof matrixBefore)==0 && memcmp(ot,otBefore,sizeof ot)==0);
  assert(g.raceTimer==76543 && g.elapsedTimeMS==32 && inst.flags==0 && hud.flags==SCREENSPACE_INSTANCE && hud.matrix.t[0]==123);
@@ -97,8 +104,15 @@ int main(void){
  g.gameMode1=0;g.level1=&other;NativeHD_RenderIntermediate(&g);assert(renders==r);
  g.pushBuffer[0].pos.x+=1500;NativeHD_RenderIntermediate(&g);assert(renders==r);
  g.numPlyrCurrGame=2;NativeHD_RenderIntermediate(&g);assert(renders==r);
+ /* Indexed lookup preserves identities across reordered lists and collisions. */
+ struct Instance many[512];struct Model otherModel={2};
+ s_hdPoseCount=512;
+ for(i=0;i<512;i++){s_hdPrevious[i].instance=&many[511-i];s_hdPrevious[i].model=&model;}
+ NativeHD_IndexPreviousPoses();
+ for(i=0;i<512;i++){assert(NativeHD_FindPreviousPose(&many[i],&model)==511-i);assert(NativeHD_FindPreviousPose(&many[i],&otherModel)==-1);}
+ assert(NativeHD_FindPreviousPose(&inst,&model)==-1);
  assert(416+720+720==1856 && 1856<=2048);
- puts("PASS actual HD midpoint: LE rotation/native translation, wrapped angles, fresh boost/explosion depth bindings before dispatch, one HUD copy with screenspace flags restored, pose/DB/OT/timer restoration, pause/level/camera-cut/split-screen guards; EDRAM 1856/2048 tiles");
+ puts("PASS actual HD midpoint: LE rotation/native translation, wrapped angles, fresh boost/explosion depth bindings before dispatch, one HUD copy with screenspace flags restored, pose/DB/OT/timer restoration, draw-only weather/cloud/star/heat paths, 512 indexed identities and model changes, pause/level/camera-cut/split-screen guards; EDRAM 1856/2048 tiles");
  return 0;
 }
 '''

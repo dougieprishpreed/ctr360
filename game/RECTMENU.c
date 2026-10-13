@@ -93,8 +93,8 @@ void RECTMENU_DrawRwdBlueRect(RECT *rect, char *metas, u32 *ot, struct PrimMem *
 	for (int i = 0; (u8)metas[i * 4 + 3] != 0x64; i++)
 	{
 		u8 *meta = (u8 *)&metas[i * 4];
-		gradient[0] = *(int *)&meta[0];
-		gradient[1] = *(int *)&meta[4];
+		gradient[0] = meta[0] | ((u32)meta[1] << 8) | ((u32)meta[2] << 16);
+		gradient[1] = meta[4] | ((u32)meta[5] << 8) | ((u32)meta[6] << 16);
 		colors[0] = gradient[0];
 		colors[1] = gradient[0];
 		colors[2] = gradient[1];

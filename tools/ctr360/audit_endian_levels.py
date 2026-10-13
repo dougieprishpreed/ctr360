@@ -75,6 +75,16 @@ def audit(retail, cooked, report_path):
                 check(4+off, 4, 'Level count')
             array(4+0x6c, 8*6, 2, 'Level driver start')
             array(4+0x17c, 6, 2, 'Level position')
+            for g in range(3):
+                opaque(4+0x48+g*12, 12, 'SkyboxGlowGradient explicit LE fields')
+                coverage['sky_gradients'] += 1
+            rain = 4+0x104
+            check(rain, 4, 'RainBuffer current count')
+            array(rain+4, 2, 2, 'RainBuffer max/vanish')
+            opaque(rain+8, 16, 'RainBuffer explicit LE scroll/velocity')
+            array(rain+24, 4, 2, 'RainBuffer native camera history/pad')
+            array(rain+32, 4, 4, 'RainBuffer colors/control/OT')
+            coverage['weather_records'] += 1
             mesh = 4+word(4)
             array(mesh, 8, 4, 'MeshInfo')
             nq, nv, _, qr, vr, _, br, nb = struct.unpack_from('<8I', raw, mesh)
@@ -124,6 +134,30 @@ def audit(retail, cooked, report_path):
                 nc = word(st)
                 if not 0 <= nc <= 16:
                     raise ValueError('invalid SpawnType1 count')
+                if entry != cook.MENU_LEVEL_ENTRY and nc >= 6:
+                    for slot in (4, 5):
+                        relative = word(st+4+slot*4)
+                        if not relative:
+                            continue
+                        gh = 4+relative
+                        array(gh, 4, 2, 'GhostHeader shorts')
+                        array(gh+8, 3, 4, 'GhostHeader ints')
+                        length = struct.unpack_from('<h', raw, gh+2)[0]
+                        if not 0 <= length <= 0x3e00-40:
+                            raise ValueError('invalid ghost tape extent')
+                        opaque(gh+20, 20+length, 'Ghost padding and compressed replay byte stream')
+                        coverage['builtin_ghosts'] += 1
+                if nc > 6 and word(st+4+6*4):
+                    credits = 4+word(st+4+6*4)
+                    length, strings = struct.unpack_from('<IH', raw, credits)
+                    if strings <= 20 or length < 8+strings*4 or credits+length > size:
+                        raise ValueError('invalid credits string block')
+                    for string in range(strings):
+                        offset = word(credits+8+string*4)
+                        if not 8+strings*4 <= offset < length or b'\0' not in raw[credits+offset:credits+length]:
+                            raise ValueError('invalid credits string offset')
+                    opaque(credits, length, 'Credits explicit LE size/count/offsets and text')
+                    coverage['credits_blocks'] += 1
                 mrel = word(st+4) if nc else 0
                 if mrel:
                     array(4+mrel, 10, 2, 'UIMapSpawnMetadata')

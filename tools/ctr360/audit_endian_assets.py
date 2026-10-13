@@ -102,8 +102,71 @@ def audit(retail, cooked, report_path):
             coverage['model_frames'] += 1
 
         roots = model_roots(raw, mapped)
-        if not roots:
+        level = cook.dram_level_scalar_sites(raw, sites, entry)
+        pack = None if level else cook.dram_pack_scalar_sites(raw, sites, entry)
+        if not roots and not level and not pack:
             report['unidentified_mapped_entries'].append(entry)
+        if not roots and (level or pack):
+            report.setdefault('classified_nonmodel_entries', []).append(
+                {'entry': entry, 'kind': 'model-free level' if level else 'icon/font-only MPK'})
+        # Independent runtime Icon/Group layout checks, separate from model
+        # discovery. TextureLayout and glyph names retain their byte contract.
+        if level or pack:
+            lookup_rel = word(4 + (0x3c if level else 0))
+            if lookup_rel:
+                lookup = 4+lookup_rel
+                ni, icons, ng, groups = struct.unpack_from('<4I', raw, lookup)
+                if ni > 4096 or ng > 1024:
+                    raise ValueError('invalid decal table counts')
+                check(lookup, 4, 'LevTexLookup.numIcon')
+                check(lookup+8, 4, 'LevTexLookup.numIconGroup')
+                icon_seen = set()
+                def check_icon(icon):
+                    if icon in icon_seen:
+                        return
+                    icon_seen.add(icon)
+                    check(icon+16, 4, 'Icon.globalIndex')
+                    if raw[icon:icon+16] != out[icon:icon+16] or raw[icon+20:icon+32] != out[icon+20:icon+32]:
+                        failures.append({'entry': entry, 'field': 'Icon.name/TextureLayout', 'offset': icon})
+                    coverage['decal_icons'] += 1
+                for i in range(ni):
+                    icon=4+icons+i*32
+                    name=raw[icon:icon+16]
+                    prefix=name.split(b'\0',1)[0]
+                    if prefix and all(32 <= b < 127 for b in prefix) and not name[len(prefix):].strip(b'\0'):
+                        check_icon(icon)
+                        continue
+                    # Counted tail aliases actual group icons in battle LEVs
+                    # with a short unused `time` record. Validate the game's
+                    # ID rejection and every unchanged byte except relocation
+                    # pointers, instead of declaring these real Icon records.
+                    retail_id=word(icon+16)
+                    native_id=int.from_bytes(out[icon+16:icon+20],'big')
+                    if min(retail_id,native_id) < 0x88:
+                        failures.append({'entry':entry,'field':'aliased icon must be rejected','offset':icon})
+                    pointer_bytes={b for p in mapped for b in range(4+p,8+p)}
+                    for b in range(icon,icon+32):
+                        if b not in pointer_bytes and raw[b]!=out[b]:
+                            failures.append({'entry':entry,'field':'aliased icon opaque byte','offset':b})
+                    report.setdefault('aliased_icon_rows',[]).append({'entry':entry,'row':i,'offset':icon,
+                        'reason':'short unused time record; invalid global ID; group targets checked separately'})
+                for i in range(ng):
+                    group=4+word(4+groups+i*4)
+                    check(group+16, 2, 'IconGroup.id')
+                    check(group+18, 2, 'IconGroup.count')
+                    count=struct.unpack_from('<h',raw,group+18)[0]
+                    if count < 0 or group+20+count*4 > size:
+                        raise ValueError('invalid glyph pointer table')
+                    if raw[group:group+16] != out[group:group+16]:
+                        failures.append({'entry': entry, 'field': 'IconGroup.name', 'offset': group})
+                    for j in range(count):
+                        icon_target=word(group+20+j*4)
+                        if icon_target:
+                            check_icon(4+icon_target)
+                        else:
+                            check(group+20+j*4,4,'IconGroup.NULL slot')
+                            coverage['null_group_icon_slots'] += 1
+                    coverage['decal_groups'] += 1
         details = {'entry': entry, 'models': []}
         for rel in roots:
             m = 4+rel

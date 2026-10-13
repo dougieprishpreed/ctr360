@@ -3459,9 +3459,9 @@ static int RenderBucket_DrawInstPrim_GhostAtRange(struct RenderBucketDrawContext
 	CtrGpu_WriteControlWord(&mask->drawMode, 0xe1000a40);
 	mask->pad = 0;
 	mask->colorAndCode = RenderBucket_Scratch()->split.fadeColor.word;
-	mask->xy0 = (u32)MFC2(12);
-	mask->xy1 = (u32)MFC2(13);
-	mask->xy2 = (u32)MFC2(14);
+	CtrGpu_WritePackedXY((VERTTYPE *)&mask->xy0, (u32)MFC2(12));
+	CtrGpu_WritePackedXY((VERTTYPE *)&mask->xy1, (u32)MFC2(13));
+	CtrGpu_WritePackedXY((VERTTYPE *)&mask->xy2, (u32)MFC2(14));
 
 	if (tex == 0)
 	{
@@ -3469,12 +3469,12 @@ static int RenderBucket_DrawInstPrim_GhostAtRange(struct RenderBucketDrawContext
 
 		CtrGpu_WriteControlWord(&packet->drawMode, 0xe1000a20);
 		packet->pad = 0;
-		packet->body.color0AndCode = 0x32000000 | (u32)MFC2(20);
-		packet->body.xy0 = (u32)MFC2(12);
-		packet->body.color1 = (u32)MFC2(21);
-		packet->body.xy1 = (u32)MFC2(13);
-		packet->body.color2 = (u32)MFC2(22);
-		packet->body.xy2 = (u32)MFC2(14);
+		CtrGpu_WriteColorCode((u8 *)&packet->body.color0AndCode, 0x32000000 | (u32)MFC2(20));
+		CtrGpu_WritePackedXY((VERTTYPE *)&packet->body.xy0, (u32)MFC2(12));
+		CtrGpu_WriteColorCode((u8 *)&packet->body.color1, (u32)MFC2(21));
+		CtrGpu_WritePackedXY((VERTTYPE *)&packet->body.xy1, (u32)MFC2(13));
+		CtrGpu_WriteColorCode((u8 *)&packet->body.color2, (u32)MFC2(22));
+		CtrGpu_WritePackedXY((VERTTYPE *)&packet->body.xy2, (u32)MFC2(14));
 
 		RenderBucket_LinkPrimRaw(otEntry, packet, 0x0e000000);
 		ctx->primMem->cursor = packet + 1;
@@ -3484,15 +3484,15 @@ static int RenderBucket_DrawInstPrim_GhostAtRange(struct RenderBucketDrawContext
 		struct RenderBucketGhostTexturedPacket *packet = (struct RenderBucketGhostTexturedPacket *)mask;
 		u32 texWord1 = (RenderBucket_ReadTextureWord(tex, RENDER_BUCKET_TEX_WORD1_OFFSET) & ~0x00600000U) | 0x00200000U;
 
-		packet->body.color0AndCode = 0x36000000 | (u32)MFC2(20);
-		packet->body.xy0 = (u32)MFC2(12);
-		packet->body.uv0 = RenderBucket_ReadTextureWord(tex, RENDER_BUCKET_TEX_WORD0_OFFSET);
-		packet->body.color1 = (u32)MFC2(21);
-		packet->body.xy1 = (u32)MFC2(13);
-		packet->body.uv1 = texWord1;
-		packet->body.color2 = (u32)MFC2(22);
-		packet->body.xy2 = (u32)MFC2(14);
-		packet->body.uv2 = RenderBucket_ReadTextureWord(tex, RENDER_BUCKET_TEX_WORD2_OFFSET);
+		CtrGpu_WriteColorCode((u8 *)&packet->body.color0AndCode, 0x36000000 | (u32)MFC2(20));
+		CtrGpu_WritePackedXY((VERTTYPE *)&packet->body.xy0, (u32)MFC2(12));
+		CtrGpu_WritePackedUVWord((u8 *)&packet->body.uv0, RenderBucket_ReadTextureWord(tex, RENDER_BUCKET_TEX_WORD0_OFFSET));
+		CtrGpu_WriteColorCode((u8 *)&packet->body.color1, (u32)MFC2(21));
+		CtrGpu_WritePackedXY((VERTTYPE *)&packet->body.xy1, (u32)MFC2(13));
+		CtrGpu_WritePackedUVWord((u8 *)&packet->body.uv1, texWord1);
+		CtrGpu_WriteColorCode((u8 *)&packet->body.color2, (u32)MFC2(22));
+		CtrGpu_WritePackedXY((VERTTYPE *)&packet->body.xy2, (u32)MFC2(14));
+		CtrGpu_WritePackedUVWord((u8 *)&packet->body.uv2, RenderBucket_ReadTextureWord(tex, RENDER_BUCKET_TEX_WORD2_OFFSET));
 
 		RenderBucket_LinkPrimRaw(otEntry, packet, 0x0f000000);
 		ctx->primMem->cursor = packet + 1;
@@ -3861,9 +3861,9 @@ static int RenderBucket_DrawSplitPrimitiveGhostAtRange(struct RenderBucketDrawCo
 	CtrGpu_WriteControlWord(&mask->drawMode, 0xe1000a40);
 	mask->pad = 0;
 	mask->colorAndCode = RenderBucket_Scratch()->split.fadeColor.word;
-	mask->xy0 = v0->sxy;
-	mask->xy1 = v1->sxy;
-	mask->xy2 = v2->sxy;
+	CtrGpu_WritePackedXY((VERTTYPE *)&mask->xy0, v0->sxy);
+	CtrGpu_WritePackedXY((VERTTYPE *)&mask->xy1, v1->sxy);
+	CtrGpu_WritePackedXY((VERTTYPE *)&mask->xy2, v2->sxy);
 
 	if (tex == 0)
 	{
@@ -3871,12 +3871,12 @@ static int RenderBucket_DrawSplitPrimitiveGhostAtRange(struct RenderBucketDrawCo
 
 		CtrGpu_WriteControlWord(&packet->drawMode, 0xe1000a20);
 		packet->pad = 0;
-		packet->body.color0AndCode = 0x32000000 | (u32)MFC2(20);
-		packet->body.xy0 = v0->sxy;
-		packet->body.color1 = (u32)MFC2(21);
-		packet->body.xy1 = v1->sxy;
-		packet->body.color2 = (u32)MFC2(22);
-		packet->body.xy2 = v2->sxy;
+		CtrGpu_WriteColorCode((u8 *)&packet->body.color0AndCode, 0x32000000 | (u32)MFC2(20));
+		CtrGpu_WritePackedXY((VERTTYPE *)&packet->body.xy0, v0->sxy);
+		CtrGpu_WriteColorCode((u8 *)&packet->body.color1, (u32)MFC2(21));
+		CtrGpu_WritePackedXY((VERTTYPE *)&packet->body.xy1, v1->sxy);
+		CtrGpu_WriteColorCode((u8 *)&packet->body.color2, (u32)MFC2(22));
+		CtrGpu_WritePackedXY((VERTTYPE *)&packet->body.xy2, v2->sxy);
 
 		RenderBucket_LinkPrimRaw(otEntry, packet, 0x0e000000);
 		ctx->primMem->cursor = packet + 1;
@@ -3889,15 +3889,15 @@ static int RenderBucket_DrawSplitPrimitiveGhostAtRange(struct RenderBucketDrawCo
 		    RenderBucket_TextureWordWithSplitUv((RenderBucket_ReadTextureWord(tex, RENDER_BUCKET_TEX_WORD1_OFFSET) & ~0x00600000U) | 0x00200000U, v1->uv);
 		u32 texWord2 = RenderBucket_TextureWordWithSplitUv(RenderBucket_ReadTextureWord(tex, RENDER_BUCKET_TEX_WORD2_OFFSET), v2->uv);
 
-		packet->body.color0AndCode = 0x36000000 | (u32)MFC2(20);
-		packet->body.xy0 = v0->sxy;
-		packet->body.uv0 = texWord0;
-		packet->body.color1 = (u32)MFC2(21);
-		packet->body.xy1 = v1->sxy;
-		packet->body.uv1 = texWord1;
-		packet->body.color2 = (u32)MFC2(22);
-		packet->body.xy2 = v2->sxy;
-		packet->body.uv2 = texWord2;
+		CtrGpu_WriteColorCode((u8 *)&packet->body.color0AndCode, 0x36000000 | (u32)MFC2(20));
+		CtrGpu_WritePackedXY((VERTTYPE *)&packet->body.xy0, v0->sxy);
+		CtrGpu_WritePackedUVWord((u8 *)&packet->body.uv0, texWord0);
+		CtrGpu_WriteColorCode((u8 *)&packet->body.color1, (u32)MFC2(21));
+		CtrGpu_WritePackedXY((VERTTYPE *)&packet->body.xy1, v1->sxy);
+		CtrGpu_WritePackedUVWord((u8 *)&packet->body.uv1, texWord1);
+		CtrGpu_WriteColorCode((u8 *)&packet->body.color2, (u32)MFC2(22));
+		CtrGpu_WritePackedXY((VERTTYPE *)&packet->body.xy2, v2->sxy);
+		CtrGpu_WritePackedUVWord((u8 *)&packet->body.uv2, texWord2);
 
 		RenderBucket_LinkPrimRaw(otEntry, packet, 0x0f000000);
 		ctx->primMem->cursor = packet + 1;

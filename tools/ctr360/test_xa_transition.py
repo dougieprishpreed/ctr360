@@ -84,20 +84,21 @@ for line in audio.splitlines():
         c += line + '\n'
 for name in ['NativeAudioXaDecodeState', 'NativeAudioXA', 'NativeAudioXaSourceKind',
              'NativeAudioXaSource', 'NativeAudioXaPreparedStream', 'NativeAudioXaCacheEntry',
-             'NativeAudioXaStream', 'NativeAudioByteBuffer', 'NativeAudioXaTrackInfo']:
+             'NativeAudioXaPreloadJob', 'NativeAudioXaStream', 'NativeAudioByteBuffer', 'NativeAudioXaTrackInfo']:
     c += structure(name)
 c += '''
 static struct {SpuCommonAttr commonAttr;struct NativeAudioXA xa;
  struct NativeAudioXaStream xaStream;} s_audio;
 static struct NativeAudioXaCacheEntry s_xaCache[NATIVE_AUDIO_XA_CACHE_SLOTS];
 static size_t s_xaCacheBytes;
+static struct NativeAudioXaPreloadJob s_xaPreloadJob;
 '''
 for name in ['NativeAudio_ReadLE32', 'NativeAudio_ReadLE16Signed', 'NativeAudio_ReadFileBytes',
              'NativeAudio_FreeByteBuffer', 'NativeAudio_BuildXAPath', 'NativeAudio_LookupXATrackInfo',
              'NativeAudio_GetXASectorLayout', 'NativeAudio_IsXAAudioSector', 'NativeAudio_XaSourceClose',
              'NativeAudio_XaSourceOpen', 'NativeAudio_XaSourceReadSector',
              'NativeAudio_XaPreparedStreamClose', 'NativeAudio_PrepareXAStream',
-             'NativeAudio_FindCachedXA', 'NativeAudio_ClearXACache', 'NativeAudio_PrepareXATrack',
+             'NativeAudio_FindCachedXA', 'NativeAudio_CancelXAPreload', 'NativeAudio_PreloadRaceEndStep', 'NativeAudio_ClearXACache', 'NativeAudio_PrepareXATrack',
              'NativeAudio_PreloadXATrack', 'NativeAudio_CloseXANoLock',
              'NativeAudio_XaStreamStartNoLock', 'NativeAudio_PlayXATrack']:
     c += function(audio, name)
@@ -160,6 +161,27 @@ int main(int argc,char **argv) {
  NativeAudio_XaSourceClose(&src);
  assert(NativeAudio_PrepareXATrack(0,5,&defeat,0));
  assert(defeat.sectorCount==1292);
+ /* Execute the incremental path and compare every compressed sector. */
+ int steps=0,status=0;
+ seeks=reads=0;
+ while(status==0) {
+  int previousReads=reads;
+  status=NativeAudio_PreloadRaceEndStep(0);steps++;
+  if(steps==1) fprintf(stderr,"initial-step metadata plus XA reads=%d\n",reads-previousReads);
+  assert(reads-previousReads<=(steps==1?13:4));assert(steps<=163);
+ }
+ assert(status==1 && steps==162 && seeks==656 && reads==656);
+ same(&victory,&s_xaCache[NativeAudio_FindCachedXA(0,4)].prepared);
+ same(&defeat,&s_xaCache[NativeAudio_FindCachedXA(0,5)].prepared);
+ assert(NativeAudio_PreloadRaceEndStep(0)==1);
+ printf("PASS paced race-end preparation: %d steps, <=4 XA reads per step plus 9 setup metadata reads, one 647-read scan, byte-identical channels\n",steps);
+ NativeAudio_ClearXACache();
+ /* An interrupted loading job releases its partial buffers and source. */
+ assert(NativeAudio_PreloadRaceEndStep(0)==0);
+ assert(s_xaPreloadJob.prepared[0].sectors && s_xaPreloadJob.source.readBuffer);
+ NativeAudio_ClearXACache();
+ assert(!s_xaPreloadJob.prepared[0].sectors && !s_xaPreloadJob.source.readBuffer);
+
  assert(NativeAudio_PreloadXATrack(0,4));
  assert(NativeAudio_PreloadXATrack(0,5));
  assert(s_xaCacheBytes==6036224);

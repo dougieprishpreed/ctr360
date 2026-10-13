@@ -111,6 +111,8 @@ struct NativeVramState
 	RECT16 cpuDirtyRects[NATIVE_VRAM_DIRTY_RECT_CAP];
 	u32 gpuNewerTiles[NATIVE_VRAM_TILE_WORDS];
 	s32 cpuDirtyRectCount;
+	b32 cpuDirtyOverflow;
+	u32 cpuDirtyPixels[VRAM_WIDTH * VRAM_HEIGHT / 32];
 };
 
 global_variable struct NativeVramState s_vram;
@@ -212,11 +214,31 @@ internal void NativeRenderer_BindMainRenderTarget(void);
 internal void NativeRenderer_DrawVRAMRegion(int x, int y, int width, int height);
 internal void NativeRenderer_LoadRenderTargetFromVRAM(struct X360RenderTarget *target, int x, int y);
 internal void NativeRenderer_Ortho2D(float left, float right, float bottom, float top, float znear, float zfar);
-internal void NativeRenderer_SyncGpuVRAMToCPU(int x, int y, int w, int h);
-internal void NativeRenderer_ResolveVRAMRead(int x, int y, int w, int h);
+internal b32 NativeRenderer_SyncGpuVRAMToCPU(int x, int y, int w, int h);
+internal b32 NativeRenderer_ResolveVRAMRead(int x, int y, int w, int h);
 internal void NativeRenderer_FlushOffscreenToVRAM(void);
 internal void NativeRenderer_GpuPackTextureToVRAM(D3DTexture *sourceTexture, int x, int y, int w, int h, b32 flipY);
 internal void NativeRenderer_MarkVRAMDirty(int x, int y, int w, int h);
+/* Track exact CPU ownership, including batches larger than the rect list. */
+internal void NativeRenderer_MarkCpuDirtyPixels(const RECT16 *rect)
+{
+ int y;
+ for (y = rect->y; y < rect->y + rect->h; y++)
+ {
+  int bit = y * VRAM_WIDTH + rect->x;
+  int end = bit + rect->w;
+  while (bit < end)
+  {
+   int count = 32 - (bit & 31);
+   u32 mask;
+   if (count > end - bit) count = end - bit;
+   mask = count == 32 ? 0xffffffffu : ((1u << count) - 1) << (bit & 31);
+   s_vram.cpuDirtyPixels[bit >> 5] |= mask;
+   bit += count;
+  }
+ }
+}
+
 internal void NativeRenderer_AppendCpuDirtyRect(const RECT16 *rect);
 internal s32 NativeRenderer_ClipVRAMRect(RECT16 *out, int x, int y, int w, int h);
 internal void NativeRenderer_MarkGpuVRAMNewer(int x, int y, int w, int h);
@@ -1112,6 +1134,7 @@ int NativeRenderer_InitialisePSX(void)
 	s_vram.cpuDirtyRects[0].w = VRAM_WIDTH;
 	s_vram.cpuDirtyRects[0].h = VRAM_HEIGHT;
 	s_vram.cpuDirtyRectCount = 1;
+	memset(s_vram.cpuDirtyPixels, 0xff, sizeof(s_vram.cpuDirtyPixels));
 	memset(s_vram.gpuNewerTiles, 0, sizeof(s_vram.gpuNewerTiles));
 
 	NativeRenderer_InitRG8LUT();
@@ -1314,11 +1337,12 @@ internal s32 NativeRenderer_ClipVRAMRect(RECT16 *out, int x, int y, int w, int h
 		h += y;
 		y = 0;
 	}
-	if ((x + w) > VRAM_WIDTH)
+	if (x >= VRAM_WIDTH || y >= VRAM_HEIGHT) return 0;
+	if (w > VRAM_WIDTH - x)
 	{
 		w = VRAM_WIDTH - x;
 	}
-	if ((y + h) > VRAM_HEIGHT)
+	if (h > VRAM_HEIGHT - y)
 	{
 		h = VRAM_HEIGHT - y;
 	}
@@ -1346,6 +1370,8 @@ internal void NativeRenderer_AppendCpuDirtyRect(const RECT16 *rect)
 	s32 i;
 	s32 writeIndex;
 
+	NativeRenderer_MarkCpuDirtyPixels(rect);
+	if (s_vram.cpuDirtyOverflow) return;
 	if ((s_vram.cpuDirtyRectCount > 0) && NativeRenderer_DirtyRectContains(&s_vram.cpuDirtyRects[0], rect))
 	{
 		return;
@@ -1364,11 +1390,7 @@ internal void NativeRenderer_AppendCpuDirtyRect(const RECT16 *rect)
 
 	if (s_vram.cpuDirtyRectCount >= NATIVE_VRAM_DIRTY_RECT_CAP)
 	{
-		s_vram.cpuDirtyRects[0].x = 0;
-		s_vram.cpuDirtyRects[0].y = 0;
-		s_vram.cpuDirtyRects[0].w = VRAM_WIDTH;
-		s_vram.cpuDirtyRects[0].h = VRAM_HEIGHT;
-		s_vram.cpuDirtyRectCount = 1;
+		s_vram.cpuDirtyOverflow = 1;
 		return;
 	}
 
@@ -1416,93 +1438,80 @@ internal void NativeRenderer_MarkGpuVRAMNewer(int x, int y, int w, int h)
 	}
 }
 
+internal void NativeRenderer_UploadCpuRect(void *tiled, const RECT *region)
+{
+ POINT destinationPoint;
+ int row;
+ for (row = region->top; row < region->bottom; row++)
+ {
+  u32 *dst = s_vramLinearScratch + row * VRAM_WIDTH;
+  int column;
+  for (column = region->left; column < region->right; column++)
+  {
+   const u16 pixel = s_vram.cpuPixels[row * VRAM_WIDTH + column];
+   dst[column] = 0xff000000u | ((u32)(pixel & 255) << 16) | ((u32)(pixel >> 8) << 8);
+  }
+ }
+ destinationPoint.x = region->left;
+ destinationPoint.y = region->top;
+ XGTileSurface(tiled, VRAM_WIDTH, VRAM_HEIGHT, &destinationPoint,
+               s_vramLinearScratch, VRAM_WIDTH * sizeof(u32), region, sizeof(u32));
+}
+
 void NativeRenderer_UpdateVRAM(void)
 {
-	s32 rectCount;
-	s32 i;
-	D3DLOCKED_RECT lock;
-	RECT region;
-
-	if (s_vram.cpuDirtyRectCount == 0)
-	{
-		return;
-	}
-
-	if (s_vram.texture == NULL)
-	{
-		s_vram.cpuDirtyRectCount = 0;
-		return;
-	}
-
-	rectCount = s_vram.cpuDirtyRectCount;
-	s_vram.cpuDirtyRectCount = 0;
-
-	/* Coalesce this batch to its bounding box, then upload once. The GL
-	 * backend issues one glTexSubImage2D per rect; the 360 equivalent is a
-	 * single lock of the covered region. */
-	region.left = s_vram.cpuDirtyRects[0].x;
-	region.top = s_vram.cpuDirtyRects[0].y;
-	region.right = s_vram.cpuDirtyRects[0].x + s_vram.cpuDirtyRects[0].w;
-	region.bottom = s_vram.cpuDirtyRects[0].y + s_vram.cpuDirtyRects[0].h;
-
-	for (i = 1; i < rectCount; i++)
-	{
-		if (s_vram.cpuDirtyRects[i].x < region.left)
-		{
-			region.left = s_vram.cpuDirtyRects[i].x;
-		}
-		if (s_vram.cpuDirtyRects[i].y < region.top)
-		{
-			region.top = s_vram.cpuDirtyRects[i].y;
-		}
-		if ((s_vram.cpuDirtyRects[i].x + s_vram.cpuDirtyRects[i].w) > region.right)
-		{
-			region.right = s_vram.cpuDirtyRects[i].x + s_vram.cpuDirtyRects[i].w;
-		}
-		if ((s_vram.cpuDirtyRects[i].y + s_vram.cpuDirtyRects[i].h) > region.bottom)
-		{
-			region.bottom = s_vram.cpuDirtyRects[i].y + s_vram.cpuDirtyRects[i].h;
-		}
-	}
-
-	/* No render-target query/refcount traffic just to print a diagnostic.
-	 * Count was reset above; report the batch we actually upload. */
-	if (Platform_TraceEnabled(CTR_TRACE_VRAM))
-		Platform_Log("[trace] UpdateVRAM: rects=%d bounds=%d,%d,%d,%d\n", (int)rectCount,
-		             (int)region.left, (int)region.top, (int)region.right, (int)region.bottom);
-	if (SUCCEEDED(IDirect3DTexture9_LockRect(s_vram.texture, 0, &lock, NULL, 0)))
-	{
-		int row;
-		POINT destinationPoint;
-		for (row = region.top; row < region.bottom; row++)
-		{
-			int column;
-			u32 *dst = s_vramLinearScratch + row * VRAM_WIDTH;
-			for (column = region.left; column < region.right; column++)
-			{
-				const u16 pixel = s_vram.cpuPixels[row * VRAM_WIDTH + column];
-				dst[column] = 0xFF000000u | ((u32)(pixel & 0xFFu) << 16) |
-				                            ((u32)(pixel >> 8) << 8);
-			}
-		}
-		destinationPoint.x = region.left;
-		destinationPoint.y = region.top;
-		XGTileSurface(lock.pBits, VRAM_WIDTH, VRAM_HEIGHT, &destinationPoint,
-		              s_vramLinearScratch, VRAM_WIDTH * sizeof(u32), &region, sizeof(u32));
-		IDirect3DTexture9_UnlockRect(s_vram.texture, 0);
-	}
-	else
-	{
-		NATIVE_RENDERER_ERROR("%s\n", "VRAM update lock failed");
-	}
-
-	s_lastBoundTexture = (TextureID)-1;
+ D3DLOCKED_RECT lock;
+ int i,y;
+ if (s_vram.cpuDirtyRectCount == 0 && !s_vram.cpuDirtyOverflow) return;
+ if (s_vram.texture == NULL) return;
+ if (FAILED(IDirect3DTexture9_LockRect(s_vram.texture, 0, &lock, NULL, 0)))
+ {
+  NATIVE_RENDERER_ERROR("%s\n", "VRAM update lock failed; preserving dirty data for retry");
+  return;
+ }
+ if (!s_vram.cpuDirtyOverflow)
+ {
+  /* A bounding box may contain newer GPU pixels. Upload only actual writes. */
+  for (i = 0; i < s_vram.cpuDirtyRectCount; i++)
+  {
+   const RECT16 *rect = &s_vram.cpuDirtyRects[i];
+   RECT region = {rect->x, rect->y, rect->x + rect->w, rect->y + rect->h};
+   NativeRenderer_UploadCpuRect(lock.pBits, &region);
+  }
+ }
+ else
+ {
+  /* Rare overflow: exact horizontal runs retain holes and need no readback. */
+  for (y = 0; y < VRAM_HEIGHT; y++)
+  {
+   int x = 0;
+   while (x < VRAM_WIDTH)
+   {
+    int bit = y * VRAM_WIDTH + x;
+    RECT region;
+    if ((s_vram.cpuDirtyPixels[bit >> 5] & (1u << (bit & 31))) == 0) {x++; continue;}
+    region.left=x;region.top=y;region.right=x;region.bottom=y+1;
+    do {x++; bit++;} while (x < VRAM_WIDTH && (s_vram.cpuDirtyPixels[bit >> 5] & (1u << (bit & 31))));
+    region.right = x;
+    NativeRenderer_UploadCpuRect(lock.pBits, &region);
+   }
+  }
+ }
+ if (FAILED(IDirect3DTexture9_UnlockRect(s_vram.texture, 0)))
+ {
+  NATIVE_RENDERER_ERROR("%s\n", "VRAM update unlock failed; preserving dirty data for retry");
+  return;
+ }
+ s_vram.cpuDirtyRectCount = 0;
+ s_vram.cpuDirtyOverflow = 0;
+ memset(s_vram.cpuDirtyPixels, 0, sizeof(s_vram.cpuDirtyPixels));
+ s_lastBoundTexture = (TextureID)-1;
 }
 
 /* The pack pass already resolves EDRAM into the linear VRAM texture. CPU
  * readers lock that resolved texture, so another EDRAM bind cannot overwrite
  * the image with unrelated draws that reused the same EDRAM base. */
-internal void NativeRenderer_SyncGpuVRAMToCPU(int x, int y, int w, int h)
+internal b32 NativeRenderer_SyncGpuVRAMToCPU(int x, int y, int w, int h)
 {
 	RECT16 readRect;
 	int tileX0, tileY0, tileX1, tileY1;
@@ -1513,7 +1522,7 @@ internal void NativeRenderer_SyncGpuVRAMToCPU(int x, int y, int w, int h)
 	Platform_Log("[trace] SyncGpuVRAMToCPU enter x=%d y=%d w=%d h=%d\n", x, y, w, h);
 	if (!NativeRenderer_ClipVRAMRect(&readRect, x, y, w, h))
 	{
-		return;
+		return 0;
 	}
 
 	tileX0 = readRect.x / NATIVE_VRAM_TILE_SIZE;
@@ -1537,7 +1546,7 @@ internal void NativeRenderer_SyncGpuVRAMToCPU(int x, int y, int w, int h)
 
 	if (!needsReadback)
 	{
-		return;
+		return 1;
 	}
 
 	readRect.x = (s16)(tileX0 * NATIVE_VRAM_TILE_SIZE);
@@ -1548,6 +1557,9 @@ internal void NativeRenderer_SyncGpuVRAMToCPU(int x, int y, int w, int h)
 	/* Pending CPU writes must reach the texture first, same ordering rule as GL. */
 	Platform_Log("[trace] -> UpdateVRAM from SyncGpuVRAMToCPU\n");
 	NativeRenderer_UpdateVRAM();
+	/* A failed upload still owns CPU dirt. Reading the old texture into the
+	 * shadow would overwrite it, and a following copy would publish stale data. */
+	if (s_vram.cpuDirtyRectCount != 0 || s_vram.cpuDirtyOverflow) return 0;
 
 	{
 		HRESULT lockResult = E_FAIL;
@@ -1559,6 +1571,7 @@ internal void NativeRenderer_SyncGpuVRAMToCPU(int x, int y, int w, int h)
 			int row;
 			XGUntileSurface(s_vramLinearScratch, VRAM_WIDTH * sizeof(u32), NULL,
 			                lock.pBits, VRAM_WIDTH, VRAM_HEIGHT, NULL, sizeof(u32));
+			if (FAILED(IDirect3DTexture9_UnlockRect(s_vram.texture, 0))) return 0;
 			for (row = 0; row < readRect.h; row++)
 			{
 				int column;
@@ -1570,12 +1583,12 @@ internal void NativeRenderer_SyncGpuVRAMToCPU(int x, int y, int w, int h)
 					    (u16)(((packed >> 16) & 0xFFu) | (packed & 0x0000FF00u));
 				}
 			}
-			IDirect3DTexture9_UnlockRect(s_vram.texture, 0);
 			Platform_Log("[trace] readback: copy done\n");
 		}
 		else
 		{
 			Platform_LogError("[CTR Renderer] VRAM readback lock failed hr=%08x\n", (unsigned)lockResult);
+			return 0;
 		}
 
 		if (SUCCEEDED(lockResult))
@@ -1592,11 +1605,12 @@ internal void NativeRenderer_SyncGpuVRAMToCPU(int x, int y, int w, int h)
 		}
 
 	}
+	return 1;
 }
 
-internal void NativeRenderer_ResolveVRAMRead(int x, int y, int w, int h)
+internal b32 NativeRenderer_ResolveVRAMRead(int x, int y, int w, int h)
 {
-	NativeRenderer_SyncGpuVRAMToCPU(x, y, w, h);
+	return NativeRenderer_SyncGpuVRAMToCPU(x, y, w, h);
 }
 
 /* TEMPORARY diagnostic: sample the CPU-side VRAM mirror WITHOUT a GPU sync
@@ -1771,28 +1785,36 @@ void NativeRenderer_DebugDumpVRAM(int x, int y, int w, int h, const char *tag)
 
 void NativeRenderer_CopyVRAM(u16 *src, int x, int y, int w, int h, int dst_x, int dst_y)
 {
-	int stride = w;
-	int i;
-	u16 *dst;
-
-	if (!src)
-	{
-		NativeRenderer_ResolveVRAMRead(x, y, w, h);
-		src = s_vram.cpuPixels;
-		stride = VRAM_WIDTH;
-	}
-
-	src += x + y * stride;
-	dst = s_vram.cpuPixels + dst_x + dst_y * VRAM_WIDTH;
-
-	for (i = 0; i < h; i++)
-	{
-		memcpy(dst, src, w * sizeof(u16));
-		dst += VRAM_WIDTH;
-		src += stride;
-	}
-
-	NativeRenderer_MarkVRAMDirty(dst_x, dst_y, w, h);
+ s64 sx=x, sy=y, dx=dst_x, dy=dst_y, width=w, height=h;
+ int fromVRAM = src == NULL;
+ int sourceWidth = fromVRAM ? VRAM_WIDTH : w;
+ int sourceHeight = fromVRAM ? VRAM_HEIGHT : h;
+ int stride = sourceWidth;
+ int firstRow, endRow, rowStep, row;
+ if (width <= 0 || height <= 0) return;
+ /* Clip both ends before pointer arithmetic. 64-bit temporaries also make
+  * invalid extreme coordinates safe without changing valid Load/MoveImage. */
+ if (sx < 0) {width += sx; dx -= sx; sx=0;}
+ if (sy < 0) {height += sy; dy -= sy; sy=0;}
+ if (dx < 0) {width += dx; sx -= dx; dx=0;}
+ if (dy < 0) {height += dy; sy -= dy; dy=0;}
+ if (width > sourceWidth-sx) width=sourceWidth-sx;
+ if (height > sourceHeight-sy) height=sourceHeight-sy;
+ if (width > VRAM_WIDTH-dx) width=VRAM_WIDTH-dx;
+ if (height > VRAM_HEIGHT-dy) height=VRAM_HEIGHT-dy;
+ if (width <= 0 || height <= 0) return;
+ x=(int)sx; y=(int)sy; dst_x=(int)dx; dst_y=(int)dy; w=(int)width; h=(int)height;
+ if (fromVRAM)
+ {
+  if (!NativeRenderer_ResolveVRAMRead(x,y,w,h)) return;
+  src=s_vram.cpuPixels;
+ }
+ firstRow=0;endRow=h;rowStep=1;
+ if (fromVRAM && dst_y > y && dst_y < y+h) {firstRow=h-1;endRow=-1;rowStep=-1;}
+ for (row=firstRow;row!=endRow;row+=rowStep)
+  memmove(s_vram.cpuPixels+(dst_y+row)*VRAM_WIDTH+dst_x,
+          src+(y+row)*stride+x,w*sizeof(u16));
+ NativeRenderer_MarkVRAMDirty(dst_x,dst_y,w,h);
 }
 
 void NativeRenderer_ReadVRAM(u16 *dst, int x, int y, int dst_w, int dst_h)
@@ -1800,7 +1822,12 @@ void NativeRenderer_ReadVRAM(u16 *dst, int x, int y, int dst_w, int dst_h)
 	u16 *src;
 	int i;
 
-	NativeRenderer_ResolveVRAMRead(x, y, dst_w, dst_h);
+	/* StoreImage owns an exact-size destination. Reject unsupported rectangles
+	 * rather than clipping the sync and then copying the original unsafe span. */
+	if (dst == NULL || x < 0 || y < 0 || dst_w <= 0 || dst_h <= 0 ||
+	    x >= VRAM_WIDTH || y >= VRAM_HEIGHT || dst_w > VRAM_WIDTH - x || dst_h > VRAM_HEIGHT - y)
+		return;
+	if (!NativeRenderer_ResolveVRAMRead(x, y, dst_w, dst_h)) return;
 
 	src = s_vram.cpuPixels + x + VRAM_WIDTH * y;
 
@@ -1838,6 +1865,8 @@ int NativeRenderer_RestoreVRAMState(const void *src, int srcSize)
 
 	memcpy(s_vram.cpuPixels, src, sizeof(s_vram.cpuPixels));
 	s_vram.cpuDirtyRectCount = 0;
+	s_vram.cpuDirtyOverflow = 0;
+	memset(s_vram.cpuDirtyPixels, 0, sizeof(s_vram.cpuDirtyPixels));
 	memset(s_vram.gpuNewerTiles, 0, sizeof(s_vram.gpuNewerTiles));
 	NativeRenderer_MarkVRAMDirty(0, 0, VRAM_WIDTH, VRAM_HEIGHT);
 	s_mainRenderTarget.width = 0;
@@ -1856,32 +1885,13 @@ int NativeRenderer_RestoreVRAMState(const void *src, int srcSize)
 
 void NativeRenderer_ClearVRAM(int x, int y, int w, int h, u8 r, u8 g, u8 b)
 {
-	u16 *dst = s_vram.cpuPixels + x + y * VRAM_WIDTH;
-	const u16 color = (u16)(((r >> 3) & 0x1f) | (((g >> 3) & 0x1f) << 5) | (((b >> 3) & 0x1f) << 10));
-	int i;
-
-	if (x + w > VRAM_WIDTH)
-	{
-		w = VRAM_WIDTH - x;
-	}
-
-	if (y + h > VRAM_HEIGHT)
-	{
-		h = VRAM_HEIGHT - y;
-	}
-
-	for (i = 0; i < h; i++)
-	{
-		u16 *tmp = dst;
-		int j;
-		for (j = 0; j < w; j++)
-		{
-			*tmp++ = color;
-		}
-		dst += VRAM_WIDTH;
-	}
-
-	NativeRenderer_MarkVRAMDirty(x, y, w, h);
+ RECT16 rect;
+ int row,column;
+ u16 color = (u16)(((r >> 3) & 31) | (((g >> 3) & 31) << 5) | (((b >> 3) & 31) << 10));
+ if (!NativeRenderer_ClipVRAMRect(&rect,x,y,w,h)) return;
+ for (row=rect.y;row<rect.y+rect.h;row++)
+  for (column=rect.x;column<rect.x+rect.w;column++) s_vram.cpuPixels[row*VRAM_WIDTH+column]=color;
+ NativeRenderer_MarkVRAMDirty(rect.x,rect.y,rect.w,rect.h);
 }
 
 internal u8 NativeRenderer_PSXColorComponent(u8 value)

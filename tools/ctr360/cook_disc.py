@@ -606,7 +606,7 @@ def dram_pack_scalar_sites(raw, sites, entry_index):
     def s16(off):
         return struct.unpack_from('<h', base, off)[0]
 
-    if 4 not in frame:
+    if 4 not in frame and (0 not in frame or u32(8) != 0):
         return None
     lookup_rel = u32(4)                      # content[0] = offset of the lookup
     if lookup_rel == 0 or (lookup_rel & 3):
@@ -642,7 +642,9 @@ def dram_pack_scalar_sites(raw, sites, entry_index):
         extra.append((4 + target + 0x12, 2))   # s16 numHeaders
         models.append(target)
         off += 4
-    if len(models) == 0:
+    # A font-only MPK has a relocated lookup followed by a NULL model list.
+    # The validated lookup/table shape above distinguishes it from a level.
+    if len(models) == 0 and (0 not in frame or u32(8) != 0):
         return None
     return extra, models
 
@@ -674,7 +676,7 @@ def dram_level_scalar_sites(raw, sites, entry_index):
         return struct.unpack_from('<I', base, off)[0]
 
     # required: mesh_info, anim_tex, models array - mapped, aligned, in-file
-    for f in (0, 8, 24):
+    for f in (0, 8):
         if f not in frame:
             return None
         v = u32(4 + f)
@@ -687,7 +689,13 @@ def dram_level_scalar_sites(raw, sites, entry_index):
             return None
     num_inst = u32(4 + 12)
     num_models = u32(4 + 20)
-    if not (1 <= num_models <= 4096) or num_inst > 4096:
+    if not (0 <= num_models <= 4096) or num_inst > 4096:
+        return None
+    model_list = u32(4 + 24)
+    if num_models:
+        if 24 not in frame or not model_list or model_list & 3 or model_list + 0x10 > n:
+            return None
+    elif model_list != 0:
         return None
     if (u32(4 + 16) == 0) != (num_inst == 0):
         return None
@@ -879,7 +887,21 @@ def dram_decal_scalar_sites(raw, sites, entry_index, is_pack, avoid=()):
         if (lookup_rel + 4) not in frame or icons_rel & 3 or 4 + icons_rel + ni * 0x20 > n:
             raise SystemExit('entry %d: invalid decal icon array' % entry_index)
         for i in range(ni):
-            add(4 + icons_rel + i * 0x20 + 0x10, 4)
+            icon = 4 + icons_rel + i * 0x20
+            name = base[icon:icon + 16]
+            prefix = name.split(b'\0', 1)[0]
+            if prefix and all(32 <= b < 127 for b in prefix) and not name[len(prefix):].strip(b'\0'):
+                add(icon + 0x10, 4)
+            else:
+                # Four battle LEVs omit the unused `time` texture's 12
+                # bytes. The counted fixed-stride tail then aliases bubble
+                # UVs and the group pointer table. These are not numeric
+                # Icon IDs. DecalGlobal_Store rejects them in either byte
+                # order; never cook their UV words as an index.
+                value = u32(icon + 0x10)
+                reversed_value = int.from_bytes(base[icon + 0x10:icon + 0x14], 'big')
+                if min(value, reversed_value) < 0x88:
+                    raise SystemExit('entry %d: ambiguous live icon row %d' % (entry_index, i))
     if ng:
         if (lookup_rel + 12) not in frame or groups_rel & 3 or 4 + groups_rel + ng * 4 > n:
             raise SystemExit('entry %d: invalid decal group array' % entry_index)
@@ -896,6 +918,14 @@ def dram_decal_scalar_sites(raw, sites, entry_index, is_pack, avoid=()):
                 raise SystemExit('entry %d: invalid decal glyph count' % entry_index)
             add(group + 0x10, 2)
             add(group + 0x12, 2)
+            for j in range(count):
+                icon_rel = u32(group + 0x14 + j * 4)
+                if icon_rel == 0:
+                    continue  # Shipped locktowood group has an unused NULL slot.
+                icon = 4 + icon_rel
+                if icon_rel & 3 or icon + 0x20 > n:
+                    raise SystemExit('entry %d: invalid group icon' % entry_index)
+                add(icon + 0x10, 4)
     return extra
 
 
@@ -987,6 +1017,20 @@ def dram_spawntype1_sites(raw, sites, entry_index):
         for f in range(TITLE_CAMERA_FRAMES):
             for k in range(6):
                 extra.append((cam + f * 12 + k * 2, 2))
+    # Built-in TT tapes: scalar GhostHeader is native, padding and compressed
+    # replay opcodes retain their original byte stream (including BE fields).
+    if entry_index != MENU_LEVEL_ENTRY and count >= 6:
+        for slot in (4, 5):
+            if not entries[slot]:
+                continue
+            ghost = 4 + entries[slot]
+            if ghost + 40 > n:
+                raise ValueError(f'entry {entry_index}: truncated ghost header')
+            version, length, level, character = struct.unpack_from('<4h', base, ghost)
+            if version != -4 or not 0 <= length <= 0x3e00 - 40 or not 0 <= level < 18 or not 0 <= character < 16 or ghost + 40 + length > n:
+                raise ValueError(f'entry {entry_index}: invalid built-in ghost header')
+            extra.extend((ghost + i, 2) for i in (0, 2, 4, 6))
+            extra.extend((ghost + i, 4) for i in (8, 12, 16))
     return extra, count
 
 

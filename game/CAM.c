@@ -141,7 +141,8 @@ static s32 CAM_SkyboxGlow_HasClearGradient(s32 gradientIndex)
 
 static u32 CAM_SkyboxGlow_ClearGradientColor(void)
 {
-	return *(u32 *)&sdata->gGT->level1->clearColor[2].rgb[0] & 0xffffff;
+	const u8 *rgb = sdata->gGT->level1->clearColor[2].rgb;
+	return rgb[0] | ((u32)rgb[1] << 8) | ((u32)rgb[2] << 16);
 }
 
 void CAM_SkyboxGlow(struct SkyboxGlowGradient *grad, struct PushBuffer *pb, struct PrimMem *primMem, u32 *ptrOT)
@@ -154,12 +155,14 @@ void CAM_SkyboxGlow(struct SkyboxGlowGradient *grad, struct PushBuffer *pb, stru
 
 	for (s32 i = 0; i < 3; i++, grad++)
 	{
-		s32 toLeft = centerY2 - grad->pointTo - tilt;
-		s32 toRight = centerY2 - grad->pointTo + tilt;
-		s32 fromLeft = centerY1 - grad->pointFrom - tilt;
-		s32 fromRight = centerY1 - grad->pointFrom + tilt;
-		u32 colorFrom = grad->colorFrom & 0xffffff;
-		u32 colorTo = grad->colorTo & 0xffffff;
+		s32 pointTo = (s16)CTR_ReadU16LE(&grad->pointTo);
+		s32 pointFrom = (s16)CTR_ReadU16LE(&grad->pointFrom);
+		s32 toLeft = centerY2 - pointTo - tilt;
+		s32 toRight = centerY2 - pointTo + tilt;
+		s32 fromLeft = centerY1 - pointFrom - tilt;
+		s32 fromRight = centerY1 - pointFrom + tilt;
+		u32 colorFrom = CTR_ReadU32LE(&grad->colorFrom) & 0xffffff;
+		u32 colorTo = CTR_ReadU32LE(&grad->colorTo) & 0xffffff;
 		u32 mask = 0;
 
 		if (toLeft >= 0)
@@ -2152,7 +2155,7 @@ SkipNewCameraEOR:
 						                  CAM_MulLo((s32)stackMemPos.z, (s32)stackMemPos.z)));
 
 						iVar18 = cDC->trackPathProgress << 0xc;
-						iVar25 = iVar18 / iVar24;
+						iVar25 = iVar24 != 0 ? iVar18 / iVar24 : 0x1000;
 						/*
 						if (iVar24 == 0)
 						{
@@ -2311,7 +2314,7 @@ SkipNewCameraEOR:
 				iVar17 = (s32)(cDC->transitionTo).pos.x;
 				iVar24 = (iVar7 - (cDC->transitionTo).pos.y) * iVar17;
 				iVar8 = (s32)(cDC->transitionTo).pos.z;
-				iVar7 = iVar24 / iVar8;
+				iVar7 = iVar8 != 0 ? iVar24 / iVar8 : 0;
 				/*
 				if (iVar8 == 0)
 				{

@@ -177,8 +177,16 @@ internal void BOTS_Adv_LerpDifficulty(s16 *dst, s16 factor)
 
 internal void BOTS_Adv_CopySpawnOrder(s32 first, s32 second)
 {
+#ifdef CTR_NATIVE
+	for (int i = 0; i < 4; i++)
+	{
+		sdata->kartSpawnOrderArray[i] = (u8)((u32)first >> (i * 8));
+		sdata->kartSpawnOrderArray[i + 4] = (u8)((u32)second >> (i * 8));
+	}
+#else
 	*(s32 *)&sdata->kartSpawnOrderArray[0] = first;
 	*(s32 *)&sdata->kartSpawnOrderArray[4] = second;
+#endif
 }
 
 internal s32 BOTS_GetTrackDistanceToFinish(struct GameTracker *gGT)

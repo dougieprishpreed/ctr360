@@ -20,6 +20,34 @@ struct NativeHDPose
 static struct NativeHDPose s_hdPrevious[NATIVE_HD_INSTANCE_LIMIT];
 static struct NativeHDPose s_hdCurrent[NATIVE_HD_INSTANCE_LIMIT];
 static int s_hdPoseCount;
+#define NATIVE_HD_POSE_HASH_SIZE 1024
+static u16 s_hdPoseHash[NATIVE_HD_POSE_HASH_SIZE];
+
+static void NativeHD_IndexPreviousPoses(void)
+{
+    int i;
+    memset(s_hdPoseHash, 0, sizeof(s_hdPoseHash));
+    for (i = 0; i < s_hdPoseCount; i++)
+    {
+        u32 slot = (((u32)s_hdPrevious[i].instance >> 4) * 2654435761u) & (NATIVE_HD_POSE_HASH_SIZE - 1);
+        while (s_hdPoseHash[slot] != 0) slot = (slot + 1) & (NATIVE_HD_POSE_HASH_SIZE - 1);
+        s_hdPoseHash[slot] = (u16)(i + 1);
+    }
+}
+
+static int NativeHD_FindPreviousPose(struct Instance *instance, struct Model *model)
+{
+    int probes;
+    u32 slot = (((u32)instance >> 4) * 2654435761u) & (NATIVE_HD_POSE_HASH_SIZE - 1);
+    for (probes = 0; probes < NATIVE_HD_POSE_HASH_SIZE; probes++)
+    {
+        int index = (int)s_hdPoseHash[slot] - 1;
+        if (index < 0) return -1;
+        if (s_hdPrevious[index].instance == instance && s_hdPrevious[index].model == model) return index;
+        slot = (slot + 1) & (NATIVE_HD_POSE_HASH_SIZE - 1);
+    }
+    return -1;
+}
 static struct Level *s_hdLevel;
 static SVec3 s_hdCameraPosition;
 static SVec3 s_hdCameraRotation;
@@ -139,6 +167,7 @@ void NativeHD_RenderIntermediate(struct GameTracker *gGT)
     }
     if (canInterpolate)
     {
+        NativeHD_IndexPreviousPoses();
         savedDB = *gGT->backBuffer;
         ot = gGT->otSwapchainDB[gGT->swapchainIndex];
         memcpy(s_hdOTBackup, ot, sizeof(s_hdOTBackup));
@@ -164,10 +193,9 @@ void NativeHD_RenderIntermediate(struct GameTracker *gGT)
                 s_hdCurrent[i].instance->flags |= HIDE_MODEL;
                 continue;
             }
-            for (j = 0; j < s_hdPoseCount; j++)
+            j = NativeHD_FindPreviousPose(s_hdCurrent[i].instance, s_hdCurrent[i].model);
+            if (j >= 0)
             {
-                if (s_hdCurrent[i].instance == s_hdPrevious[j].instance && s_hdCurrent[i].model == s_hdPrevious[j].model)
-                {
                     int axis, continuous = 1;
                     for (axis = 0; axis < 3; axis++)
                     {
@@ -175,8 +203,6 @@ void NativeHD_RenderIntermediate(struct GameTracker *gGT)
                         if (delta > 1024 || delta < -1024) continuous = 0;
                     }
                     if (continuous) NativeHD_InterpolateMatrix(&s_hdCurrent[i].instance->matrix, &s_hdPrevious[j].matrix, &s_hdCurrent[i].matrix);
-                    break;
-                }
             }
         }
         PushBuffer_UpdateFrustum(&gGT->pushBuffer[0]);
@@ -186,12 +212,21 @@ void NativeHD_RenderIntermediate(struct GameTracker *gGT)
         if (gGT->visMem1 != NULL) CTR_CycleTex_LEV(level->ptr_anim_tex, gGT->timer);
         g_nativeHDIntermediate = 1;
         NativeGpu_SetHUDCapture(0);
+        /* These draw paths use the pause argument to suppress scroll/count
+         * updates. The main frame remains their only simulation update. */
+        if ((gGT->renderFlags & RENDER_FLAG_RAIN) != 0)
+            RenderWeather(&gGT->pushBuffer[0], &gGT->backBuffer->primMem, &gGT->rainBuffer[0], 1, PAUSE_ALL);
+        if ((gGT->renderFlags & RENDER_FLAG_BEAKER_RAIN) != 0)
+            RedBeaker_RenderRain(&gGT->pushBuffer[0], &gGT->backBuffer->primMem, &gGT->JitPools.rain, 1, PAUSE_ALL);
+        if ((gGT->renderFlags & RENDER_FLAG_STARS) != 0 && gGT->stars.numStars != 0)
+            RenderStars(&gGT->pushBuffer[0], &gGT->backBuffer->primMem, &gGT->stars, 1);
         RenderBucket_QueueAllInstances(gGT);
         RenderAllNormalParticles(gGT);
         NativeHD_BindInheritedDepthRanges(gGT);
         RenderBucket_ExecuteAllInstances(gGT);
         RenderAllTires(gGT);
         RenderAllShadows(gGT);
+        RenderAllHeatParticles(gGT);
         RenderAllLevelGeometry(gGT, level, level->ptr_mesh_info);
         NativeHD_DrawCountdown(gGT);
         if ((gGT->renderFlags & RENDER_FLAG_CLEAR_BACK_BUFFER) != 0) CAM_ClearScreen(gGT);

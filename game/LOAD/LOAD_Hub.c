@@ -1,9 +1,24 @@
 #include <common.h>
+#ifdef CTR_NATIVE
+#include <platform/native_log.h>
+#endif
 
 // packID will always be 3-gGT->activeMempackIndex
 void LOAD_Hub_ReadFile(struct BigHeader *bigfile, int levID, int packID)
 {
 	struct GameTracker *gGT = sdata->gGT;
+
+#ifdef CTR_NATIVE
+	/* The preload trigger is sampled every gameplay frame. A NULL level2
+	 * also means its three-file load has not finished yet, not just that a
+	 * mask overwrote it. Never reset an allocator underneath a queued read
+	 * or reuse the talking mask's model while its instance is alive. */
+	if (sdata->load_inProgress || sdata->queueLength || !sdata->queueReady || sdata->AkuAkuHintState != 0)
+		return;
+	if (packID < LOAD_FIRST_SUBPACK_INDEX || packID > LOAD_SECOND_SUBPACK_INDEX ||
+	    packID == gGT->activeMempackIndex || (u32)(levID - GEM_STONE_VALLEY) >= LOAD_ADV_HUB_COUNT)
+		return;
+#endif
 
 	// if level is already loaded, quit
 	if (gGT->levID_in_each_mempack[packID] == levID
@@ -16,6 +31,11 @@ void LOAD_Hub_ReadFile(struct BigHeader *bigfile, int levID, int packID)
 	}
 
 	sdata->modelMaskHints3D = 0;
+
+#ifdef CTR_NATIVE
+	Platform_Log("[load] hub preload from=%d destination=%d pack=%d\n", gGT->levelID, levID, packID);
+	Platform_LogFlush();
+#endif
 
 	// Swap to pack of hub you're NOT on,
 	// wipe the pack to reload the new hub
@@ -39,6 +59,18 @@ void LOAD_Hub_SwapNow()
 	struct GameTracker *gGT = sdata->gGT;
 
 #ifdef CTR_NATIVE
+	if (gGT->activeMempackIndex < LOAD_FIRST_SUBPACK_INDEX || gGT->activeMempackIndex > LOAD_SECOND_SUBPACK_INDEX)
+		return;
+	if (sdata->AkuAkuHintState != 0)
+	{
+		/* Its live instance owns the inactive pack; retry after it dies. */
+		gGT->bool_AdvHub_NeedToSwapLEV = 1;
+		return;
+	}
+	Platform_Log("[load] hub swap begin level=%d active=%d level2=%08x loading=%d queue=%d ready=%d\n",
+	             gGT->levelID, gGT->activeMempackIndex, (unsigned)(u32)gGT->level2,
+	             sdata->load_inProgress, sdata->queueLength, sdata->queueReady);
+	Platform_LogFlush();
 	if (gGT->level2 == NULL)
 	{
 		int packID = LOAD_HUB_MEMPACK_PAIR_INDEX_SUM - gGT->activeMempackIndex;

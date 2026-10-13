@@ -16,7 +16,7 @@
 #define VEH_EMITTER_MUL_RAW(lhs, rhs)                                           ((void)0)
 #define VEH_EMITTER_READ_LO(result)                                             ((void)(result))
 #define VEH_EMITTER_HILO_DELAY()                                                ((void)0)
-#define VEH_EMITTER_STORE_MAC_DIRECT(out)                                       CTR_GteStoreMAC((s32 *)(out))
+#define VEH_EMITTER_STORE_MAC_DIRECT(out)                                       CTR_GteStoreRuntimeMAC((s32 *)(out))
 #define VEH_EMITTER_STORE_EXHAUST_VELOCITY(out)                                 VehEmitter_StoreMAC(&(out)->vx)
 #define VEH_EMITTER_ZERO_AFTER_LOAD(value, dependency)                          ((value) = 0)
 #else
@@ -677,6 +677,9 @@ rumbleDone:
 
 static inline void VehEmitter_SetRotMatrix(MATRIX *m)
 {
+#ifdef CTR_NATIVE
+	CTR_GteSetRotMatrix(m);
+#else
 	const CtrPackedU32 *matrixWords = (const CtrPackedU32 *)m;
 	register u32 word0 CTR_PSX_REGISTER("$12");
 	register u32 word1 CTR_PSX_REGISTER("$13");
@@ -693,6 +696,7 @@ static inline void VehEmitter_SetRotMatrix(MATRIX *m)
 	CTC2(word0, 2);
 	CTC2(word1, 3);
 	CTC2(word2, 4);
+#endif
 }
 
 static inline void VehEmitter_StoreMAC(s32 *out)

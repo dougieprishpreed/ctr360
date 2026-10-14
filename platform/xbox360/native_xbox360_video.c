@@ -634,6 +634,20 @@ internal const char *NativeRenderer_BuildShader(char *buffer, size_t bufferSize,
  * Device and render targets
  * --------------------------------------------------------------------------------------- */
 
+#include "platform/native_config.h"
+
+static void NativeRenderer_ConfigSetting(const char *section, const char *key, const char *value, void *context)
+{
+    int enabled;
+    extern int g_nativeHDEnableInterpolation;
+    (void)context;
+    if (strcmp(section, "graphics") != 0 || (strcmp(value, "0") != 0 && strcmp(value, "1") != 0)) return;
+    enabled = value[0] == '1';
+    if (strcmp(key, "interpolation") == 0) g_nativeHDEnableInterpolation = enabled;
+    else if (strcmp(key, "texture_filter") == 0) g_cfg_bilinearFiltering = enabled;
+    else if (strcmp(key, "edge_aa") == 0) s_hdEdgeAA = enabled;
+}
+
 int NativeRenderer_InitialiseRender(char *windowName, int width, int height, int fullscreen)
 {
 	D3DPRESENT_PARAMETERS pp;
@@ -662,6 +676,8 @@ int NativeRenderer_InitialiseRender(char *windowName, int width, int height, int
         }
         fclose(graphicsSettings);
     }
+    /* Keep old graphics files working. The general config takes precedence. */
+    NativeConfig_Read("game:\\ctr360.ini", NativeRenderer_ConfigSetting, NULL);
     Platform_Log("[HD] 1280x720 expanded 16:9; interpolation=%d filter=%d edgeAA=%d diagnostics=%d\n",g_nativeHDEnableInterpolation,g_cfg_bilinearFiltering,s_hdEdgeAA,s_hdCaptureDiagnostics);
 
 	(void)windowName;

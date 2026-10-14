@@ -52,11 +52,7 @@ else
     echo "copied:  $IMAGE"
 fi
 
-cat > "$DIST/assets/ctr360_graphics.example.txt" <<'EOF'
-interpolation 1
-texture_filter 1
-edge_aa 1
-EOF
+cp "$ROOT/tools/ctr360/ctr360.example.ini" "$DIST/ctr360.example.ini"
 
 cat > "$DIST/README.txt" <<'EOF'
 CTR360 - Crash Team Racing (Xbox 360 native), development build
@@ -82,10 +78,12 @@ and edge smoothing. Single-player races target 60 FPS render / 30 Hz
 simulation. Adventure hubs, menus and other modes keep their normal cadence.
 This is a development build; performance and stability issues can remain.
 
-To change graphics, copy assets/ctr360_graphics.example.txt to
-assets/ctr360_graphics.txt. Keys interpolation, texture_filter and edge_aa
-accept 0 (off) or 1 (on). Restart after changes. Set interpolation 0 for the
-30 FPS rendering fallback while keeping 720p and widescreen.
+Edit ctr360.ini beside default.xex to change graphics and button mapping.
+If missing, copy ctr360.example.ini to ctr360.ini. Restart after changes.
+Set interpolation = 0 for 30 FPS rendering while keeping 720p and widescreen.
+The example lists physical controller names and the default bindings.
+Keep ctr360.ini and memcards/ when updating. The older graphics settings file
+is still read; settings in ctr360.ini take precedence.
 
 If reporting a fault, describe the mode/course and reproduction steps and
 include ctr360.log. The first writable root is used: cache:\, game:\,

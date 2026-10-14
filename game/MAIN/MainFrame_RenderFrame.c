@@ -248,16 +248,6 @@ void MainFrame_RenderFrame(struct GameTracker *gGT, struct GamepadSystem *gGamep
 	if ((gGT->renderFlags & RENDER_FLAG_CHECKERED_FLAG) != 0)
 	{
 		RaceFlag_DrawSelf();
-#ifdef _XBOX
-		if (RaceFlag_GetCanDraw())
-		{
-			/* A copied UI rectangle selects the full-width environment while
-			 * leaving the normal HUD/text environment on the original buffer.
-			 * OT insertion is reversed: this packet runs before the flag. */
-			struct PushBuffer flagBuffer = gGT->pushBuffer_UI;
-			PushBuffer_SetDrawEnv_Normal(RaceFlag_GetOT(), &flagBuffer, gGT->backBuffer, NULL, 0);
-		}
-#endif
 	}
 
 	RenderDispEnv_UI(gGT);

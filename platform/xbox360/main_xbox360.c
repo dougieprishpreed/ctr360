@@ -70,6 +70,7 @@
 #include "platform/native_str.c"
 
 /* Xbox 360 backends. */
+#include "platform/native_config.c"
 #include "platform/xbox360/native_xbox360_log.c"
 #include "platform/xbox360/native_xbox360_fault.c"
 #include "platform/xbox360/native_xbox360_audio_out.c"

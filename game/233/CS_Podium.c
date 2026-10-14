@@ -642,8 +642,6 @@ static struct Thread *CS_Podium_InitDancer(struct Model *model, u8 modelID, s32 
 		return NULL;
 	}
 	previous = gGT->modelPtr[modelID];
-	Platform_Log("[podium] dancer rank=%d id=%u name=%.16s model=%p shared=%p\n",
-	             (int)rank, (unsigned)modelID, model->name, (void *)model, (void *)previous);
 	gGT->modelPtr[modelID] = model;
 	thread = CS_Thread_Init(modelID, name, initData, yawOffset, NULL);
 	gGT->modelPtr[modelID] = previous;

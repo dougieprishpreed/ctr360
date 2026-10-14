@@ -622,11 +622,14 @@ void RaceFlag_DrawSelf(void)
 #ifdef _XBOX
 	/* Keep the loading letters at their authored proportions. The flag's
 	 * full-width environment is prepended after its geometry is generated. */
-	PushBuffer_SetDrawEnv_Normal(RaceFlag_GetOT(), &GAME_TRACKER->pushBuffer_UI, GAME_TRACKER->backBuffer, NULL, 0);
+	PushBuffer_SetDrawEnv_Normal(GAME_TRACKER->otSwapchainDB[GAME_TRACKER->swapchainIndex],
+	                            &GAME_TRACKER->pushBuffer_UI, GAME_TRACKER->backBuffer, NULL, 0);
 #endif
 SkipText:
 	*((volatile s32 *)(&sdata->RaceFlag_CopyLoadStage)) = RACE_FLAG_LOADING_STAGE;
 
+	/* GetOT advances animation/draw order. Advance once for the geometry;
+	 * loading letters always use the swapchain OT selected above. */
 	ot = RaceFlag_GetOT();
 	RaceFlag_LoadMatrix();
 	CTR_GteSetGeomOffset(256, 120);
@@ -759,7 +762,7 @@ SkipText:
 						POLY_G4 *next = back->primMem.cursor;
 						register u32 packedLeft CTR_PSX_REGISTER("$3");
 						u32 packed;
-						if (next <= ((POLY_G4 *)back->primMem.guardEnd))
+						if (CtrGpu_PrimFits(next, back->primMem.guardEnd, sizeof(*next)))
 						{
 							poly = next;
 							back->primMem.cursor = next + 1;
@@ -822,4 +825,10 @@ SkipText:
 	}
 
 	sdata->RaceFlag_ElapsedTime = (s32)(((u32)sdata->RaceFlag_ElapsedTime) + (GAME_TRACKER->elapsedTimeMS * 100));
+#ifdef _XBOX
+	{
+		struct PushBuffer flagBuffer = GAME_TRACKER->pushBuffer_UI;
+		PushBuffer_SetDrawEnv_Normal(ot, &flagBuffer, GAME_TRACKER->backBuffer, NULL, 0);
+	}
+#endif
 }

@@ -122,25 +122,28 @@ Use CTR's normal save/load menus. CTR360 creates its own virtual memory-card fil
 
 When rebuilding after a source update, regenerate the mirror, compile the executable, prepare the disc image with the current cooker, and repeat the staging steps. Keep the executable and converted assets from the same source version. The release staging tool preserves the existing `build-360/releases/ctr360/memcards` folder and personal graphics settings.
 
-On your console, replace the executable and supplied assets while **keeping your existing `memcards/` folder** and `assets/ctr360_graphics.txt`, if present. Do not delete the old game folder before copying an update unless you have backed up its saves.
+On your console, replace the executable and supplied assets while **keeping your existing `memcards/` folder** and `ctr360.ini`. Keep `assets/ctr360_graphics.txt` too, if present. Do not delete the old game folder before copying an update unless you have backed up its saves.
 
-## Graphics settings
+## Configuration
 
-Defaults are enabled. To change them, copy `assets/ctr360_graphics.example.txt` to `assets/ctr360_graphics.txt` in the installed game folder and edit the values:
+Edit `ctr360.ini` beside `default.xex` to change graphics and controller bindings. If it is missing, copy `ctr360.example.ini` to `ctr360.ini`. Restart after changes. Graphics defaults are enabled:
 
-```text
-interpolation 1
-texture_filter 1
-edge_aa 1
+```ini
+[graphics]
+interpolation = 1
+texture_filter = 1
+edge_aa = 1
 ```
 
-Each value accepts `0` (off) or `1` (on). Restart the game after changing settings.
+Each graphics value accepts `0` (off) or `1` (on). The older `assets/ctr360_graphics.txt` is still supported; `ctr360.ini` takes precedence. Missing or invalid settings retain defaults.
 
 - `interpolation`: intermediate render poses for the single-player 60 FPS target. Set this to `0` for the 30 FPS rendering fallback; 720p and widescreen remain enabled.
 - `texture_filter`: smooths world textures.
 - `edge_aa`: smooths polygon edges.
 
 World geometry uses an expanded 16:9 projection. The original HUD and menu layout retain their authored proportions. Texture filtering improves sampling; it does not replace the original textures with higher-detail artwork.
+
+The `[controls]` section maps original PlayStation buttons to Xbox controls for all controllers. For example, `cross = RT` moves accelerate/confirm to the right trigger, and `r2 = A` moves R2 to A. Available buttons are `A B X Y LB RB LT RT LS RS START BACK DPAD_UP DPAD_DOWN DPAD_LEFT DPAD_RIGHT NONE`. Stick axes use `LEFT_X LEFT_Y RIGHT_X RIGHT_Y`; prefix an axis with `-` to invert it. The supplied example lists every destination and default. Names are case sensitive. The physical **Back + Start** exit shortcut stays active regardless of remapping.
 
 ## Troubleshooting
 
@@ -152,7 +155,7 @@ World geometry uses an expanded 16:9 projection. The original HUD and menu layou
 
 **Saving fails or reports a full card.** Check that `memcards/` can be created and written beside `default.xex`, and that the drive has free space. Back up existing saves before investigating or replacing card files.
 
-**Performance is uneven.** Try `interpolation 0`. If reporting a problem, include the course, mode, how to reproduce it, and the build used. The game writes `ctr360.log` to the first writable location among `cache:\`, `game:\`, `hdd1:\`, and `usb0:\`; include that log when available.
+**Performance is uneven.** Try `interpolation = 0`. If reporting a problem, include the course, mode, how to reproduce it, and the build used. The game writes `ctr360.log` to the first writable location among `cache:\`, `game:\`, `hdd1:\`, and `usb0:\`; include that log when available.
 
 For optional Xenia Canary testing, launch the staged XEX with `--allow_game_relative_writes=true` so saves can be written beside it. Console testing remains necessary for performance and compatibility.
 

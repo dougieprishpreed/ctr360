@@ -21,6 +21,7 @@
 
 #include "platform/native_input.h"
 #include "platform/native_log.h"
+#include "platform/native_config.h"
 #include "psx/libpad.h"
 
 #define NATIVE_INPUT_MAX_CONTROLLERS       PLATFORM_INPUT_PAD_COUNT
@@ -382,6 +383,60 @@ static void NativeInput_ApplyScript(void)
 	previousPressed = pressed;
 }
 
+static void NativeInput_ConfigSetting(const char *section, const char *key, const char *value, void *context)
+{
+    static const struct {const char *name; size_t offset;} destinations[] = {
+#define CTR360_BIND(name, field) {name, offsetof(struct NativeInputControllerMapping, field)}
+        CTR360_BIND("cross", gc_cross), CTR360_BIND("circle", gc_circle),
+        CTR360_BIND("square", gc_square), CTR360_BIND("triangle", gc_triangle),
+        CTR360_BIND("l1", gc_l1), CTR360_BIND("r1", gc_r1),
+        CTR360_BIND("l2", gc_l2), CTR360_BIND("r2", gc_r2),
+        CTR360_BIND("l3", gc_l3), CTR360_BIND("r3", gc_r3),
+        CTR360_BIND("start", gc_start), CTR360_BIND("select", gc_select),
+        CTR360_BIND("dpad_up", gc_dpad_up), CTR360_BIND("dpad_down", gc_dpad_down),
+        CTR360_BIND("dpad_left", gc_dpad_left), CTR360_BIND("dpad_right", gc_dpad_right),
+        CTR360_BIND("left_x", gc_axis_left_x), CTR360_BIND("left_y", gc_axis_left_y),
+        CTR360_BIND("right_x", gc_axis_right_x), CTR360_BIND("right_y", gc_axis_right_y)
+#undef CTR360_BIND
+    };
+    static const struct {const char *name; s32 binding;} sources[] = {
+        {"A", X360_BTN_A}, {"B", X360_BTN_B}, {"X", X360_BTN_X}, {"Y", X360_BTN_Y},
+        {"LB", X360_BTN_LEFT_SHOULDER}, {"RB", X360_BTN_RIGHT_SHOULDER},
+        {"LS", X360_BTN_LEFT_THUMB}, {"RS", X360_BTN_RIGHT_THUMB},
+        {"START", X360_BTN_START}, {"BACK", X360_BTN_BACK},
+        {"DPAD_UP", X360_BTN_DPAD_UP}, {"DPAD_DOWN", X360_BTN_DPAD_DOWN},
+        {"DPAD_LEFT", X360_BTN_DPAD_LEFT}, {"DPAD_RIGHT", X360_BTN_DPAD_RIGHT},
+        {"LT", X360_MAP_AXIS | X360_AXIS_LEFT_TRIGGER},
+        {"RT", X360_MAP_AXIS | X360_AXIS_RIGHT_TRIGGER},
+        {"LEFT_X", X360_MAP_AXIS | X360_AXIS_LEFT_X},
+        {"LEFT_Y", X360_MAP_AXIS | X360_AXIS_LEFT_Y},
+        {"RIGHT_X", X360_MAP_AXIS | X360_AXIS_RIGHT_X},
+        {"RIGHT_Y", X360_MAP_AXIS | X360_AXIS_RIGHT_Y}, {"NONE", -1}
+    };
+    size_t i, j;
+    int inverse = *value == '-';
+    (void)context;
+    if (strcmp(section, "controls") != 0) return;
+    if (inverse) value++;
+    for (i = 0; i < sizeof(destinations) / sizeof(destinations[0]); i++)
+    {
+        if (strcmp(key, destinations[i].name) != 0) continue;
+        for (j = 0; j < sizeof(sources) / sizeof(sources[0]); j++)
+        {
+            s32 binding = sources[j].binding;
+            if (strcmp(value, sources[j].name) != 0) continue;
+            if (inverse)
+            {
+                if (binding < 0 || !(binding & X360_MAP_AXIS)) return;
+                binding |= X360_MAP_INVERSE;
+            }
+            *(s32 *)((char *)&s_controllerMapping + destinations[i].offset) = binding;
+            return;
+        }
+        return;
+    }
+}
+
 internal void NativeInput_DefaultMappings(void)
 {
 	s_controllerMapping.gc_square = X360_BTN_X;
@@ -409,6 +464,7 @@ internal void NativeInput_DefaultMappings(void)
 	s_controllerMapping.gc_axis_left_y = X360_MAP_AXIS | X360_AXIS_LEFT_Y | X360_MAP_INVERSE;
 	s_controllerMapping.gc_axis_right_x = X360_MAP_AXIS | X360_AXIS_RIGHT_X;
 	s_controllerMapping.gc_axis_right_y = X360_MAP_AXIS | X360_AXIS_RIGHT_Y | X360_MAP_INVERSE;
+	NativeConfig_Read("game:\\ctr360.ini", NativeInput_ConfigSetting, NULL);
 }
 
 /* Trigger axes (4 = left trigger, 5 = right trigger) scale 0..255 -> 0..32767

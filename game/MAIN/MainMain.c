@@ -225,6 +225,13 @@ u32 main(void)
 				// right before loading the next requested level
 				else if (iVar8 == -4)
 				{
+#ifdef CTR_NATIVE
+					if ((sdata->frameCounter % 120) == 0)
+						Platform_Log("[load] awaiting flag from=%d to=%d pos=%d anim=%d canDraw=%d flags=%08x\n",
+						             (int)gGT->levelID, (int)sdata->Loading.Lev_ID_To_Load,
+						             (int)sdata->RaceFlag_Position, (int)sdata->RaceFlag_AnimationType,
+						             (int)sdata->RaceFlag_CanDraw, (unsigned)gGT->renderFlags);
+#endif
 					RemBitsConfig8 = sdata->Loading.OnBegin.RemBitsConfig8;
 					AddBitsConfig8 = sdata->Loading.OnBegin.AddBitsConfig8;
 					RemBitsConfig0 = sdata->Loading.OnBegin.RemBitsConfig0;

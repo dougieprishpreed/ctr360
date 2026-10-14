@@ -3,6 +3,7 @@ from pathlib import Path
 import hashlib
 import json
 import os
+import re
 import shutil
 
 root = Path(__file__).resolve().parents[2]
@@ -23,7 +24,7 @@ def cards():
 
 before = cards()
 files = ['default.xex', 'README.txt', 'assets/ctr-u.bin',
-         'assets/ctr360_graphics.example.txt']
+         'ctr360.example.ini']
 for name in files:
     src, dst = source / name, release / name
     assert src.is_file(), src
@@ -40,9 +41,21 @@ for name in files:
     finally:
         pending.unlink(missing_ok=True)
 
+# Existing user INIs are never replaced. Migrate valid legacy graphics choices
+# when creating the general configuration for the first time.
+config = release / 'ctr360.ini'
+if not config.exists():
+    text = (release / 'ctr360.example.ini').read_text(encoding='utf-8')
+    legacy = release / 'assets/ctr360_graphics.txt'
+    if legacy.is_file():
+        for key, value in re.findall(r'(?m)^\s*(interpolation|texture_filter|edge_aa)\s+([01])\s*$', legacy.read_text()):
+            text = re.sub(r'(?m)^' + key + r' = [01]$', key + ' = ' + value, text)
+    with config.open('x', encoding='utf-8', newline='\n') as stream:
+        stream.write(text)
 (release / 'memcards').mkdir(exist_ok=True)
 assert cards() == before, 'release save files changed'
 report = {'directory': str(release), 'memcards_unchanged': True,
+          'config_preserved_or_created': True,
           'memcard_files': len(before),
           'files': {name: {'size': (release / name).stat().st_size,
                            'sha256': digest(release / name)} for name in files}}

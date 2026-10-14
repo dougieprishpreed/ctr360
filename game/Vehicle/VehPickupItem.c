@@ -40,8 +40,8 @@ static inline void VehPickupItem_CopyInstanceMatrix(struct Instance *dst, const 
 #define VehPickupItem_SetWarpballMatrixPair(matrix, index, first, second) \
 	do                                                                    \
 	{                                                                     \
-		((s16 *)(matrix)->m)[(index)] = (first);                          \
-		((s16 *)(matrix)->m)[(index) + 1] = (second);                     \
+		VehMatrix_WriteS16(&((s16 *)(matrix)->m)[(index)], (first));         \
+		VehMatrix_WriteS16(&((s16 *)(matrix)->m)[(index) + 1], (second));    \
 	} while (0)
 #else
 typedef u32 VehPickupItemMatrixWord CTR_MAY_ALIAS;

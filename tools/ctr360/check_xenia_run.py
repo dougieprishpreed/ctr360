@@ -18,6 +18,7 @@ def check(directory, minimum_race_age=None):
         'packet_failures': r'invalid tag length|invalid packet length|invalid-prim|invalid OT link|overshoot|OT walk[^\r\n]*(?:cycle|cap)|Unhandled (?:zero length|tagless)[^\r\n]*primitive|\[CTR GPU\] packet reports kind=\d+ suppressed=[1-9]\d*',
         'gpu_link_failures': r'GPU link bridge (?:has no token|failed to register)',
         'asset_contract_failures': r'\[asset-contract\]',
+        'podium_model_failures': r'\[podium\] invalid loaded dancer\b',
     }
     counts = {key: len(re.findall(pattern, guest, re.I)) for key, pattern in patterns.items()}
     # Match actual calls / STOP lines, not the normal imported-symbol list.

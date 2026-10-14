@@ -622,6 +622,39 @@ const struct CsPodiumNames csPodiumNames = {
     .s_victorycam = "victorycam",
 };
 
+static struct Thread *CS_Podium_InitDancer(struct Model *model, u8 modelID, s32 rank, const char *name,
+                                          struct CsThreadInitData *initData, s16 yawOffset)
+{
+#ifdef CTR_NATIVE
+	struct GameTracker *gGT = GAME_TRACKER;
+	struct Model *previous;
+	struct Thread *thread;
+
+	if (modelID == NOFUNC)
+		return CS_Thread_Init(modelID, name, initData, yawOffset, NULL);
+	/* Each podium slot owns its loaded victory/defeat model. A shared model
+	 * ID can refer to a different file (or another slot); retain this slot's
+	 * model across birth, which copies the pointer into the new instance. */
+	if (modelID < STATIC_CRASHDANCE || modelID > STATIC_OXIDEDANCE || model == NULL || model->id != modelID)
+	{
+		Platform_LogError("[podium] invalid loaded dancer rank=%d requested=%u loaded=%d model=%p\n",
+		                 (int)rank, (unsigned)modelID, model ? (int)model->id : -1, (void *)model);
+		return NULL;
+	}
+	previous = gGT->modelPtr[modelID];
+	Platform_Log("[podium] dancer rank=%d id=%u name=%.16s model=%p shared=%p\n",
+	             (int)rank, (unsigned)modelID, model->name, (void *)model, (void *)previous);
+	gGT->modelPtr[modelID] = model;
+	thread = CS_Thread_Init(modelID, name, initData, yawOffset, NULL);
+	gGT->modelPtr[modelID] = previous;
+	return thread;
+#else
+	(void)model;
+	(void)rank;
+	return CS_Thread_Init(modelID, name, initData, yawOffset, NULL);
+#endif
+}
+
 void CS_Podium_FullScene_Init(void)
 {
 	struct Instance *driverInstSelf;
@@ -714,7 +747,7 @@ void CS_Podium_FullScene_Init(void)
 		init->characterPos.z = PODIUM_THIRD_POS_Z;
 
 		// create thread for "third"
-		CS_Thread_Init(gGT->podium_modelIndex_Third, &csPodiumNames.s_third[0], init, PODIUM_THIRD_YAW_OFFSET, 0);
+		CS_Podium_InitDancer(data.podiumModel_thirdPlace, gGT->podium_modelIndex_Third, 2, &csPodiumNames.s_third[0], init, PODIUM_THIRD_YAW_OFFSET);
 	}
 
 	// if someone placed second
@@ -728,7 +761,7 @@ void CS_Podium_FullScene_Init(void)
 			init->characterPos.z = PODIUM_SECOND_POS_Z;
 
 			// create thread for "second"
-			CS_Thread_Init(gtSecond->podium_modelIndex_Second, &csPodiumNames.s_second[0], init, PODIUM_SECOND_YAW_OFFSET, 0);
+			CS_Podium_InitDancer(data.podiumModel_secondPlace, gtSecond->podium_modelIndex_Second, 1, &csPodiumNames.s_second[0], init, PODIUM_SECOND_YAW_OFFSET);
 		}
 	}
 	init->characterPos.x = PODIUM_FIRST_POS_X;
@@ -736,7 +769,7 @@ void CS_Podium_FullScene_Init(void)
 	init->characterPos.z = PODIUM_FIRST_POS_Z;
 
 	// create thread for "first"
-	CS_Thread_Init(GAME_TRACKER->podium_modelIndex_First, CS_PODIUM_FIRST_NAME, init, 0, 0);
+	CS_Podium_InitDancer(data.podiumModel_firstPlace, GAME_TRACKER->podium_modelIndex_First, 0, CS_PODIUM_FIRST_NAME, init, 0);
 
 	init->characterPos.x = PODIUM_TAWNA_POS_X;
 	init->characterPos.y = PODIUM_TAWNA_POS_Y;

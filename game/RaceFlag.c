@@ -619,6 +619,11 @@ void RaceFlag_DrawSelf(void)
 		}
 	}
 	RaceFlag_DrawLoadingString();
+#ifdef _XBOX
+	/* Keep the loading letters at their authored proportions. The flag's
+	 * full-width environment is prepended after its geometry is generated. */
+	PushBuffer_SetDrawEnv_Normal(RaceFlag_GetOT(), &GAME_TRACKER->pushBuffer_UI, GAME_TRACKER->backBuffer, NULL, 0);
+#endif
 SkipText:
 	*((volatile s32 *)(&sdata->RaceFlag_CopyLoadStage)) = RACE_FLAG_LOADING_STAGE;
 

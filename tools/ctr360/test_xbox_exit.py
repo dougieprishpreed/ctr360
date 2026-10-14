@@ -35,7 +35,7 @@ typedef struct {struct {WORD wButtons;} Gamepad;} XINPUT_STATE;
 enum {ERROR_SUCCESS=0,XINPUT_GAMEPAD_BACK=0x20,XINPUT_GAMEPAD_START=0x10,NATIVE_MEMCARD_OK=0};
 #define CTR_NATIVE_VERSION "fixture"
 #define CTR_NATIVE_BUILD_ID "fixture"
-static int s_platformInitialized,launches,flushes,closed,shutdowns,polls,sleeps;
+static int s_platformInitialized,launches,flushes,closed,shutdowns,polls,sleeps,fixups;
 static int exitStatus,failStage,failLaunch,ctrResult,buttons;
 static jmp_buf leave;
 static void Platform_Log(const char*fmt,...){
@@ -55,7 +55,8 @@ static void XLaunchNewImage(const char*path,void*data){
 }
 static void Sleep(unsigned ms){assert(ms==1000&&launches==1);if(++sleeps==2)longjmp(leave,2);}
 static void Platform_InstallFaultHandler(void){}
-static int NativeAssets_Init(const char*path){assert(!strcmp(path,"game:\\"));return failStage!=1;}
+static void Ctr360_ApplyStaticFixups(void){assert(!fixups);fixups++;}
+static int NativeAssets_Init(const char*path){assert(fixups==1&&!strcmp(path,"game:\\"));return failStage!=1;}
 static const char*NativeAssets_GetBaseDir(void){return "game:\\";}
 static const char*NativeAssets_GetAssetDir(void){return "game:\\assets";}
 static int NativeAssets_Validate(void){return failStage!=2;}
@@ -71,7 +72,7 @@ c+=function('game/LOAD/LOAD_File.c','LOAD_NativeReadFailure')
 c+=function('platform/xbox360/main_xbox360.c','main').replace('int main(void)','static int xboxMain(void)')
 c+=r'''
 static void reset(void){
- s_platformInitialized=launches=flushes=closed=shutdowns=polls=sleeps=0;
+ s_platformInitialized=launches=flushes=closed=shutdowns=polls=sleeps=fixups=0;
  exitStatus=-100;failStage=failLaunch=ctrResult=buttons=0;
 }
 int main(void){

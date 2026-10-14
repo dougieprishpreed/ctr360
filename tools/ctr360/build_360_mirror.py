@@ -1788,7 +1788,10 @@ def flatten_fixups(unode, path_base, fx, ctx, typedefs, records, log):
         rec = record_of(t, typedefs, records)
         kids = elements(node)
         explicit = [k for k in kids if not is_implicit(k)]
-        if not explicit:
+        # Scalar literals have no children. Only an empty aggregate (or an
+        # implicit initializer) is zero-filled; an explicit integer/float
+        # leaf must still produce an assignment.
+        if is_implicit(node) or (not explicit and (rec or t.strip().endswith("]") or node.get("kind") == "InitListExpr")):
             return True
         if rec and rec["kind"] == "union":
             sp = list_span(node)
@@ -3061,7 +3064,7 @@ def main():
             fixups_all.extend(fixups)
 
     # 5b. generated runtime fixups for non-first union members
-    if fixups_all:
+    if fixups_all or os.path.isfile(os.path.join(out, "platform", "xbox360", "main_xbox360.c")):
         body = [
             "/* ctr360 - generated file. Do not edit.",
             " * Runtime application of designated union-member initializers that C89 /",

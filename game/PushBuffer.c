@@ -259,9 +259,9 @@ void PushBuffer_SetDrawEnv_Normal(void *ot, struct PushBuffer *pb, struct DB *ba
 	newDrawEnv.isbg = isbg;
 
 	void *p = backBuffer->primMem.cursor;
-	if (p <= backBuffer->primMem.guardEnd)
+	if (CtrGpu_PrimFits(p, backBuffer->primMem.guardEnd, 0x40))
 	{
-		backBuffer->primMem.cursor = (void *)((u32)backBuffer->primMem.cursor + 0x40);
+		backBuffer->primMem.cursor = (u8 *)p + 0x40;
 
 		SetDrawEnv(p, &newDrawEnv);
 #ifdef _XBOX

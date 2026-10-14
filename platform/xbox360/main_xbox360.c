@@ -35,6 +35,10 @@
 #include "game/zGlobal_DATA.c"
 #include "game/zGlobal_SDATA.c"
 
+/* The mirror converts non-first union initializers to startup assignments.
+ * Compile them into this unity unit, after the globals they initialize. */
+#include "game/_ctr360_fixups.c"
+
 #undef RECT
 
 /* Mirrored platform files (identical to main.c's list minus the host backends
@@ -90,6 +94,7 @@ int main(void)
 	Platform_InstallFaultHandler();
 	Platform_Log("[CTR Native] Starting (Xbox 360)\n");
 	Platform_Log("[CTR Native] Version: %s (%s)\n", CTR_NATIVE_VERSION, CTR_NATIVE_BUILD_ID);
+	Ctr360_ApplyStaticFixups();
 	Platform_Log("[boot] asset-paths begin root=%s\n", basePath);
 
 	if (!NativeAssets_Init(basePath))

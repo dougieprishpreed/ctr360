@@ -1112,28 +1112,31 @@ internal void NativeRenderer_InitVRAMPipelines(void)
 
 	elements[0].Stream = 0;
 	elements[0].Offset = 0;
-	elements[0].Type = D3DDECLTYPE_SHORT4;
+	/* Xenos endian mode belongs to the stream, not each attribute. Use
+	 * 8-in-32 throughout and undo lane reversal with declaration swizzles. */
+	elements[0].Type = (D3DDECLTYPE)MAKED3DDECLTYPE2(GPUVERTEXFORMAT_16_16_16_16, GPUENDIAN_8IN32,
+		GPUVERTEXSIGN_SIGNED, GPUNUMFORMAT_INTEGER, GPUSWIZZLE_Y, GPUSWIZZLE_X, GPUSWIZZLE_W, GPUSWIZZLE_Z);
 	elements[0].Method = D3DDECLMETHOD_DEFAULT;
 	elements[0].Usage = D3DDECLUSAGE_POSITION;
 	elements[0].UsageIndex = 0;
 	elements[1].Stream = 0;
 	elements[1].Offset = 8;
-	/* GrVertex stores byte fields in address order, not as a packed DWORD.
-	 * The stock UBYTE4 types swap 8-in-32, reversing UV/brightness, RGBA
-	 * and signed UV corrections. Shorts above still need 8-in-16. */
-	elements[1].Type = (D3DDECLTYPE)(D3DDECLTYPE_UBYTE4 & ~D3DDECLTYPE_ENDIAN_MASK);
+	elements[1].Type = (D3DDECLTYPE)MAKED3DDECLTYPE2(GPUVERTEXFORMAT_8_8_8_8, GPUENDIAN_8IN32,
+		GPUVERTEXSIGN_UNSIGNED, GPUNUMFORMAT_INTEGER, GPUSWIZZLE_W, GPUSWIZZLE_Z, GPUSWIZZLE_Y, GPUSWIZZLE_X);
 	elements[1].Method = D3DDECLMETHOD_DEFAULT;
 	elements[1].Usage = D3DDECLUSAGE_TEXCOORD;
 	elements[1].UsageIndex = 0;
 	elements[2].Stream = 0;
 	elements[2].Offset = 12;
-	elements[2].Type = (D3DDECLTYPE)(D3DDECLTYPE_UBYTE4N & ~D3DDECLTYPE_ENDIAN_MASK);
+	elements[2].Type = (D3DDECLTYPE)MAKED3DDECLTYPE2(GPUVERTEXFORMAT_8_8_8_8, GPUENDIAN_8IN32,
+		GPUVERTEXSIGN_UNSIGNED, GPUNUMFORMAT_FRACTION, GPUSWIZZLE_W, GPUSWIZZLE_Z, GPUSWIZZLE_Y, GPUSWIZZLE_X);
 	elements[2].Method = D3DDECLMETHOD_DEFAULT;
 	elements[2].Usage = D3DDECLUSAGE_COLOR;
 	elements[2].UsageIndex = 0;
 	elements[3].Stream = 0;
 	elements[3].Offset = 16;
-	elements[3].Type = (D3DDECLTYPE)(D3DDECLTYPE_UBYTE4 & ~D3DDECLTYPE_ENDIAN_MASK);
+	elements[3].Type = (D3DDECLTYPE)MAKED3DDECLTYPE2(GPUVERTEXFORMAT_8_8_8_8, GPUENDIAN_8IN32,
+		GPUVERTEXSIGN_UNSIGNED, GPUNUMFORMAT_INTEGER, GPUSWIZZLE_W, GPUSWIZZLE_Z, GPUSWIZZLE_Y, GPUSWIZZLE_X);
 	elements[3].Method = D3DDECLMETHOD_DEFAULT;
 	elements[3].Usage = D3DDECLUSAGE_TEXCOORD;
 	elements[3].UsageIndex = 1;

@@ -11,6 +11,7 @@ JOBS="${JOBS:-1}"
 mkdir -p "$OUT"
 python3 "$ROOT/tools/ctr360/audit_endian_source.py" --report "$OUT/endian-source.json"
 python3 "$ROOT/tools/xsdk/verify_deps.py" "$XSDK" "$VULKAN4XENON"
+python3 "$ROOT/tools/xsdk/test_vertex_fetch.py" --xsdk "$XSDK" --vulkan "$VULKAN4XENON"
 python3 "$ROOT/tools/xsdk/prepare_sources.py" --root "$ROOT" --out "$ROOT/build-xsdk/gen"
 make -C "$XSDK" -j"$JOBS" TOOLCHAIN="$XSDK_TOOLCHAIN/bin/powerpc-xsdk-elf-" build/libxsdk.a build/host/libxsc.so
 make -C "$VULKAN4XENON" -j"$JOBS" XSDK="$XSDK" TOOLCHAIN="$XSDK_TOOLCHAIN/bin/powerpc-xsdk-elf-" build/libvulkan4xenon.a

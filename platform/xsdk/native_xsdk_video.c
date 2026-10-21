@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <stddef.h>
 #include "ctr_shaders.h"
 
 enum { XV_WIDTH=1280,XV_HEIGHT=720,XV_VERTEX_BYTES=16*1024*1024,XV_UNIFORM_BYTES=2*1024*1024 };
@@ -21,7 +22,15 @@ typedef struct {
     unsigned width,height,pass;
 } XvTarget;
 typedef struct { float rect[4],scale[4],flags[4],source[4]; } XvUniform;
-typedef struct { float position[4],tc[4],color[4],extra[4]; } XvVertex;
+/* Vulkan formats describe fields by address. The pinned Vulkan layer applies
+ * Xenos's per-word byte swap and the appropriate byte/halfword swizzles.
+ * Do not substitute DWORD-packed formats for these byte arrays. */
+typedef GrVertex XvVertex;
+typedef struct { float position[4]; } XvQuadVertex;
+CTR_STATIC_ASSERT(sizeof(XvVertex) == 20);
+CTR_STATIC_ASSERT(offsetof(XvVertex, u) == 8);
+CTR_STATIC_ASSERT(offsetof(XvVertex, r) == 12);
+CTR_STATIC_ASSERT(offsetof(XvVertex, tcx) == 16);
 static struct {
     VkInstance instance;VkPhysicalDevice physical;VkDevice device;VkQueue queue;
     VkSurfaceKHR surface;VkSwapchainKHR swapchain;unsigned imageCount;
@@ -147,8 +156,13 @@ static VkPipeline XvPipeline(unsigned pass,int quad,BlendMode blend,int stencil)
     VkPipelineShaderStageCreateInfo stages[2]={
         {.sType=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,.stage=VK_SHADER_STAGE_VERTEX_BIT,.module=xv.shaders[quad?2:0],.pName="main"},
         {.sType=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,.stage=VK_SHADER_STAGE_FRAGMENT_BIT,.module=xv.shaders[quad?3:1],.pName="main"}};
-    VkVertexInputBindingDescription binding={0,sizeof(XvVertex),VK_VERTEX_INPUT_RATE_VERTEX};
-    VkVertexInputAttributeDescription attrs[4];for(unsigned i=0;i<4;i++)attrs[i]=(VkVertexInputAttributeDescription){i,0,VK_FORMAT_R32G32B32A32_SFLOAT,i*16};
+    VkVertexInputBindingDescription binding={0,quad?sizeof(XvQuadVertex):sizeof(XvVertex),VK_VERTEX_INPUT_RATE_VERTEX};
+    VkVertexInputAttributeDescription attrs[4]={
+        {0,0,VK_FORMAT_R16G16B16A16_SSCALED,0},
+        {1,0,VK_FORMAT_R8G8B8A8_USCALED,8},
+        {2,0,VK_FORMAT_R8G8B8A8_UNORM,12},
+        {3,0,VK_FORMAT_R8G8B8A8_SSCALED,16}};
+    if(quad)attrs[0].format=VK_FORMAT_R32G32B32A32_SFLOAT;
     VkPipelineVertexInputStateCreateInfo input={.sType=VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
         .vertexBindingDescriptionCount=1,.pVertexBindingDescriptions=&binding,.vertexAttributeDescriptionCount=quad?1:4,.pVertexAttributeDescriptions=attrs};
     VkPipelineInputAssemblyStateCreateInfo assembly={.sType=VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,.topology=quad?VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP:VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST};
@@ -291,8 +305,8 @@ int NativeRenderer_InitialiseRender(char *name,int width,int height,int fullscre
             .pAttachments=&t->view,.width=XV_WIDTH,.height=XV_HEIGHT,.layers=1};XV_CALL(vkCreateFramebuffer(xv.device,&fb,NULL,&t->framebuffer));
     }
     XvImage(&xv.main,XV_WIDTH,XV_HEIGHT,1);XvImage(&xv.off,1024,512,1);XvImage(&xv.vram,1024,512,0);XvImage(&xv.white,1,1,0);
-    XvBufferCreate(&xv.vertices,XV_VERTEX_BYTES+4*sizeof(XvVertex),VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-    XvVertex *quad=(XvVertex *)(xv.vertices.map+XV_VERTEX_BYTES);
+    XvBufferCreate(&xv.vertices,XV_VERTEX_BYTES+4*sizeof(XvQuadVertex),VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+    XvQuadVertex *quad=(XvQuadVertex *)(xv.vertices.map+XV_VERTEX_BYTES);
     memset(quad,0,4*sizeof(*quad));quad[1].position[1]=1;quad[2].position[0]=1;quad[3].position[0]=1;quad[3].position[1]=1;
     XvBufferCreate(&xv.uniforms,XV_UNIFORM_BYTES,VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
     XvBufferCreate(&xv.staging,1024*512*4,VK_BUFFER_USAGE_TRANSFER_SRC_BIT|VK_BUFFER_USAGE_TRANSFER_DST_BIT);
@@ -377,11 +391,7 @@ void NativeRenderer_UpdateVertexBuffer(const GrVertex *vertices,int count)
     if(xv.vertexCursor+bytes>XV_VERTEX_BYTES){XvSubmit();xv.vertexCursor=0;}
     xv.vertexBase=xv.vertexCursor;xv.vertexCount=count;
     XvVertex *out=(XvVertex *)(xv.vertices.map+xv.vertexCursor);xv.vertexCursor+=bytes;
-    for(int i=0;i<count;i++){
-        const GrVertex *v=&vertices[i];out[i]=(XvVertex){
-            {v->x,v->y,v->page,v->clut},{v->u,v->v,v->bright,v->dither},
-            {v->r/255.0f,v->g/255.0f,v->b/255.0f,v->a/255.0f},{v->tcx,v->tcy,v->_p0,v->_p1}};
-    }
+    memcpy(out,vertices,bytes);
 }
 void NativeRenderer_DrawTriangles(int first,int triangles)
 {

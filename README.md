@@ -6,6 +6,40 @@ CTR360 runs the game from your own PlayStation disc dump. It includes 1280×720 
 
 CTR360 has been tested on real Xbox 360 hardware. This is an early development build; expect instability while development continues.
 
+## Experimental open SDK build
+
+The `experimental/xsdk-vulkan` branch also builds with [xSDK](https://github.com/xenosworks/xsdk) and [vulkan4xenon](https://github.com/xenosworks/vulkan4xenon), without the Microsoft XDK. This backend is experimental and has not yet been verified on a console. Use a separate game folder and a backup of your saves. The hardware-tested status above applies to the regular XDK backend.
+
+Build on Linux, or in a Linux distribution under WSL. Install the open toolchain prerequisites, then fetch and build the pinned dependencies:
+
+```bash
+sudo apt-get install build-essential bison flex texinfo libgmp-dev libmpfr-dev libmpc-dev \
+  curl xz-utils patch python3 cmake ninja-build git ca-certificates
+git switch experimental/xsdk-vulkan
+bash tools/xsdk/bootstrap.sh
+```
+
+The first toolchain build takes time and several gigabytes. For faster WSL builds, keep the dependency and compiler directories on the Linux filesystem; `CTR_XSDK_DEPS` and `XSDK_TOOLCHAIN` override their default locations. Use the paths printed by the bootstrap script, or these defaults:
+
+```bash
+export XSDK="$PWD/build-xsdk/deps/xsdk"
+export VULKAN4XENON="$PWD/build-xsdk/deps/vulkan4xenon"
+export XSDK_TOOLCHAIN="$PWD/build-xsdk/toolchain"
+export XSDK_GLSLANG="$PWD/build-xsdk/deps/glslang-xenon/build-host/StandAlone/glslang"
+bash tools/xsdk/build.sh
+```
+
+Convert your own original disc dump and stage a separate console folder:
+
+```bash
+python3 tools/ctr360/cook_disc.py --disc "/path/to/CTR-USA.bin" \
+  --out "$PWD/build-xsdk/ctr-u-360.bin"
+python3 tools/xsdk/stage.py --xex "$PWD/build-xsdk/output/default.xex" \
+  --cooked "$PWD/build-xsdk/ctr-u-360.bin" --out "$PWD/build-xsdk/releases/ctr360"
+```
+
+Copy `build-xsdk/releases/ctr360` to writable console storage. Its configuration and controller layout match the regular build. xSDK's display path currently needs a console; Xenia cannot validate this backend's presentation. Keep `memcards/` and `ctr360.ini` when updating either build.
+
 ## What you need
 
 - An Xbox 360 capable of launching unsigned homebrew XEX files, with a compatible dashboard such as Aurora.

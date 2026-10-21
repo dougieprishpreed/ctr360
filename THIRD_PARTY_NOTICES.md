@@ -140,3 +140,14 @@ corresponding GNU Binutils 2.40 source archive.
 The applicable GNU licenses are retained in `externals/psx-binutils/COPYING`
 and `externals/psx-binutils/COPYING3`; exact archive and binary hashes are
 recorded in `externals/psx-binutils/UPSTREAM.md`.
+
+
+## Optional open Xbox 360 backend
+
+The experimental build links xSDK and vulkan4xenon, both by the xenosworks contributors under the MIT license. Its build tools use glslang-xenon (glslang's BSD-style license), SPIRV-Tools and SPIRV-Headers (Apache-2.0), and xSDK's GCC, binutils and newlib toolchain. These dependencies are fetched separately; their source and license files remain in their respective checkouts. No Microsoft SDK headers, libraries or shader compiler are used by this backend.
+
+- xSDK: https://github.com/xenosworks/xsdk/blob/main/LICENSE
+- vulkan4xenon: https://github.com/xenosworks/vulkan4xenon/blob/main/LICENSE
+- glslang-xenon: https://github.com/xenosworks/glslang-xenon/blob/xenon/LICENSE.txt
+
+Runtime distribution must include the applicable notices from linked dependencies.

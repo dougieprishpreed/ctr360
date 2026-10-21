@@ -2942,6 +2942,8 @@ def main():
     plat_src = os.path.join(root, "platform")
     if os.path.isdir(plat_src):
         for dirpath, dirnames, filenames in os.walk(plat_src):
+            # The C17/Vulkan backend is compiled separately from the XDK mirror.
+            dirnames[:] = [name for name in dirnames if name != "xsdk"]
             for fn in filenames:
                 if fn in PLATFORM_EXCLUDE:
                     continue

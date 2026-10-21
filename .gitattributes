@@ -2,3 +2,5 @@
 /externals/maspsx/** -text
 /externals/old-gcc/** -text
 /externals/psx-binutils/** -text
+
+/tools/xsdk/*.sh text eol=lf

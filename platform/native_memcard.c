@@ -846,6 +846,14 @@ enum NativeMemcardResult NativeMemcard_WriteSaveData(const char *save_name, cons
 		if (result != NATIVE_MEMCARD_OK)
 			DeleteFileA(temporary);
 	}
+#elif defined(CTR_XSDK)
+    {
+        if (CtrXsdkWriteThrough(temporary, icon, icon_byte_count, src, byte_count) != 0)
+            result = NATIVE_MEMCARD_IO_ERROR;
+        if ((result == NATIVE_MEMCARD_OK) && (rename(temporary, path) != 0))
+            result = NATIVE_MEMCARD_IO_ERROR;
+        if (result != NATIVE_MEMCARD_OK) remove(temporary);
+    }
 #else
 	{
 		FILE *file = fopen(temporary, "wb");

@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 DEPS="${CTR_XSDK_DEPS:-$ROOT/build-xsdk/deps}"
 PREFIX="${XSDK_TOOLCHAIN:-$ROOT/build-xsdk/toolchain}"
-JOBS="${JOBS:-8}"
+JOBS="${JOBS:-1}"
 mkdir -p "$DEPS"
 fetch() {
   local name="$1" ref="$2" sha="$3"

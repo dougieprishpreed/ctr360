@@ -2,7 +2,7 @@
 
 A native Xbox 360 port of **Crash Team Racing**, based on [CTR Native](https://github.com/CTR-tools/ctr-native) and the [CTR-ModSDK](https://github.com/CTR-tools/CTR-ModSDK) decompilation.
 
-CTR360 runs the game from your own PlayStation disc dump. It includes 1280×720 rendering, an expanded 16:9 view, texture filtering, edge smoothing, controller input, audio, and persistent saves. Single-player races target 60 FPS rendering while keeping the original 30 Hz game simulation. Adventure hubs, menus, and other modes retain their normal cadence.
+CTR360 runs the game from your own PlayStation disc dump. It includes 1280Ã—720 rendering, an expanded 16:9 view, texture filtering, edge smoothing, controller input, audio, and persistent saves. Single-player races target 60 FPS rendering while keeping the original 30 Hz game simulation. Adventure hubs, menus, and other modes retain their normal cadence.
 
 CTR360 has been tested on real Xbox 360 hardware. This is an early development build; expect instability while development continues.
 
@@ -19,7 +19,7 @@ git switch experimental/xsdk-vulkan
 bash tools/xsdk/bootstrap.sh
 ```
 
-The first toolchain build takes time and several gigabytes. For faster WSL builds, keep the dependency and compiler directories on the Linux filesystem; `CTR_XSDK_DEPS` and `XSDK_TOOLCHAIN` override their default locations. Use the paths printed by the bootstrap script, or these defaults:
+Builds default to one compiler job to limit CPU and memory use. The first toolchain build takes time and several gigabytes. For faster WSL builds, keep the dependency and compiler directories on the Linux filesystem; `CTR_XSDK_DEPS` and `XSDK_TOOLCHAIN` override their default locations. Use the paths printed by the bootstrap script, or these defaults:
 
 ```bash
 export XSDK="$PWD/build-xsdk/deps/xsdk"
@@ -139,13 +139,13 @@ The Xbox controller follows the original button layout:
 
 | Xbox 360 | Original PlayStation button |
 | --- | --- |
-| A | Cross — accelerate / confirm |
-| B | Circle — use item / back |
-| X | Square — brake |
+| A | Cross â€” accelerate / confirm |
+| B | Circle â€” use item / back |
+| X | Square â€” brake |
 | Y | Triangle |
-| LB / RB | L1 / R1 — hop / powerslide |
+| LB / RB | L1 / R1 â€” hop / powerslide |
 | LT / RT | L2 / R2 |
-| Start | Start — pause |
+| Start | Start â€” pause |
 | Back | Select |
 
 Use the left stick or D-pad to steer. **Back + Start exits the game**, so avoid pressing that combination during play.

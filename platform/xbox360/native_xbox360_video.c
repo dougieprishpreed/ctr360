@@ -85,14 +85,10 @@
 #define X360_OFFSCREEN_EDRAM_MAX_W 1024
 #define X360_OFFSCREEN_EDRAM_MAX_H 512
 
-/* 16 floats per vertex after expansion from the 20-byte packed GrVertex. */
-typedef struct X360Vertex
-{
-	f32 x, y, page, clut;
-	f32 u, v, bright, dither;
-	f32 r, g, b, a;
-	f32 tcx, tcy, p0, p1;
-} X360Vertex;
+/* Hardware vertex fetch converts the native signed shorts / bytes directly
+ * to shader float4s: 20 bytes instead of sixteen expanded floats. */
+typedef GrVertex X360Vertex;
+CTR_STATIC_ASSERT(sizeof(X360Vertex) == 20);
 
 struct X360RenderTarget
 {
@@ -126,6 +122,41 @@ global_variable struct X360RenderTarget s_nullTarget;
 
 global_variable Direct3D *s_d3d;
 global_variable D3DDevice *s_device;
+
+#include "native_xbox360_state_cache.h"
+static Ctr360ConstantCache s_vsConstants, s_psConstants;
+static Ctr360RenderStateCache s_renderStates;
+static void Ctr360_InvalidateDeviceState(void)
+{
+    memset(&s_vsConstants, 0, sizeof(s_vsConstants));
+    memset(&s_psConstants, 0, sizeof(s_psConstants));
+    memset(&s_renderStates, 0, sizeof(s_renderStates));
+}
+static void Ctr360_SetVertexShaderConstantF(D3DDevice *device, UINT first, const float *values, UINT count)
+{
+    if (Ctr360ConstantsEqual(&s_vsConstants, first, values, count)) return;
+    IDirect3DDevice9_SetVertexShaderConstantF(device, first, values, count);
+    Ctr360ConstantsRemember(&s_vsConstants, first, values, count);
+}
+static void Ctr360_SetPixelShaderConstantF(D3DDevice *device, UINT first, const float *values, UINT count)
+{
+    if (Ctr360ConstantsEqual(&s_psConstants, first, values, count)) return;
+    IDirect3DDevice9_SetPixelShaderConstantF(device, first, values, count);
+    Ctr360ConstantsRemember(&s_psConstants, first, values, count);
+}
+static void Ctr360_SetRenderState(D3DDevice *device, D3DRENDERSTATETYPE state, DWORD value)
+{
+    unsigned int index = (unsigned int)state;
+    if (index < CTR360_RENDER_STATES && s_renderStates.valid[index] &&
+        s_renderStates.values[index] == value) return;
+    IDirect3DDevice9_SetRenderState(device, state, value);
+    if (index < CTR360_RENDER_STATES)
+    {
+        s_renderStates.valid[index] = 1;
+        s_renderStates.values[index] = value;
+    }
+}
+
 global_variable int s_presentedFrames;
 global_variable int s_shaderCompileFailures;
 global_variable D3DSurface *s_backBuffer;          /* swap chain back buffer (GL's framebuffer 0) */
@@ -433,7 +464,7 @@ global_variable const char *x360_psx_vs =
 	"	o.ditherCoord = a_position.xy;\n"
 	"	o.texcoord = a_texcoord;\n"
 	"	o.texcoord.w *= DrawScale.z;\n"
-	"	o.texcoord.xy += a_extra.xy * 0.5;\n"
+	"	o.texcoord.xy += (a_extra.xy - step(128.0, a_extra.xy) * 256.0) * 0.5;\n"
 	"	o.color = a_color;\n"
 	"	o.color.xyz *= a_texcoord.z;\n"
 	"	o.page_clut.x = frac(a_position.z / 16.0) * 1024.0;\n"
@@ -703,6 +734,7 @@ int NativeRenderer_InitialiseRender(char *windowName, int width, int height, int
 		return 0;
 	}
 
+	Ctr360_InvalidateDeviceState();
 	hr = Direct3D_CreateDevice(0, D3DDEVTYPE_HAL, NULL, D3DCREATE_HARDWARE_VERTEXPROCESSING, &pp, &s_device);
 	if (FAILED(hr) || (s_device == NULL))
 	{
@@ -728,16 +760,16 @@ int NativeRenderer_InitialiseRender(char *windowName, int width, int height, int
 	}
 	Platform_Log("[CTR Renderer] back buffer surface: %s\n", (s_backBuffer != NULL) ? "ok" : "missing");
 
-	IDirect3DDevice9_SetRenderState(s_device, D3DRS_ZENABLE, FALSE);
-	IDirect3DDevice9_SetRenderState(s_device, D3DRS_CULLMODE, D3DCULL_NONE);
-	IDirect3DDevice9_SetRenderState(s_device, D3DRS_FILLMODE, D3DFILL_SOLID);
-	IDirect3DDevice9_SetRenderState(s_device, D3DRS_ALPHABLENDENABLE, FALSE);
-	IDirect3DDevice9_SetRenderState(s_device, D3DRS_STENCILENABLE, TRUE);
-	IDirect3DDevice9_SetRenderState(s_device, D3DRS_SCISSORTESTENABLE, FALSE);
-	IDirect3DDevice9_SetRenderState(s_device, D3DRS_COLORWRITEENABLE, D3DCOLORWRITEENABLE_ALL);
-	IDirect3DDevice9_SetRenderState(s_device, D3DRS_SEPARATEALPHABLENDENABLE, TRUE);
-	IDirect3DDevice9_SetRenderState(s_device, D3DRS_SRCBLENDALPHA, D3DBLEND_ONE);
-	IDirect3DDevice9_SetRenderState(s_device, D3DRS_DESTBLENDALPHA, D3DBLEND_ZERO);
+	Ctr360_SetRenderState(s_device, D3DRS_ZENABLE, FALSE);
+	Ctr360_SetRenderState(s_device, D3DRS_CULLMODE, D3DCULL_NONE);
+	Ctr360_SetRenderState(s_device, D3DRS_FILLMODE, D3DFILL_SOLID);
+	Ctr360_SetRenderState(s_device, D3DRS_ALPHABLENDENABLE, FALSE);
+	Ctr360_SetRenderState(s_device, D3DRS_STENCILENABLE, TRUE);
+	Ctr360_SetRenderState(s_device, D3DRS_SCISSORTESTENABLE, FALSE);
+	Ctr360_SetRenderState(s_device, D3DRS_COLORWRITEENABLE, D3DCOLORWRITEENABLE_ALL);
+	Ctr360_SetRenderState(s_device, D3DRS_SEPARATEALPHABLENDENABLE, TRUE);
+	Ctr360_SetRenderState(s_device, D3DRS_SRCBLENDALPHA, D3DBLEND_ONE);
+	Ctr360_SetRenderState(s_device, D3DRS_DESTBLENDALPHA, D3DBLEND_ZERO);
 
 	IDirect3DDevice9_SetSamplerState(s_device, 0, D3DSAMP_MINFILTER, D3DTEXF_POINT);
 	IDirect3DDevice9_SetSamplerState(s_device, 0, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
@@ -770,6 +802,7 @@ void NativeRenderer_UpdateSwapIntervalState(int swapInterval)
 
 void NativeRenderer_Shutdown(void)
 {
+	Ctr360_InvalidateDeviceState();
 	if (s_device != NULL)
 	{
 		IDirect3DDevice9_Release(s_device);
@@ -1079,25 +1112,25 @@ internal void NativeRenderer_InitVRAMPipelines(void)
 
 	elements[0].Stream = 0;
 	elements[0].Offset = 0;
-	elements[0].Type = D3DDECLTYPE_FLOAT4;
+	elements[0].Type = D3DDECLTYPE_SHORT4;
 	elements[0].Method = D3DDECLMETHOD_DEFAULT;
 	elements[0].Usage = D3DDECLUSAGE_POSITION;
 	elements[0].UsageIndex = 0;
 	elements[1].Stream = 0;
-	elements[1].Offset = 16;
-	elements[1].Type = D3DDECLTYPE_FLOAT4;
+	elements[1].Offset = 8;
+	elements[1].Type = D3DDECLTYPE_UBYTE4;
 	elements[1].Method = D3DDECLMETHOD_DEFAULT;
 	elements[1].Usage = D3DDECLUSAGE_TEXCOORD;
 	elements[1].UsageIndex = 0;
 	elements[2].Stream = 0;
-	elements[2].Offset = 32;
-	elements[2].Type = D3DDECLTYPE_FLOAT4;
+	elements[2].Offset = 12;
+	elements[2].Type = D3DDECLTYPE_UBYTE4N;
 	elements[2].Method = D3DDECLMETHOD_DEFAULT;
 	elements[2].Usage = D3DDECLUSAGE_COLOR;
 	elements[2].UsageIndex = 0;
 	elements[3].Stream = 0;
-	elements[3].Offset = 48;
-	elements[3].Type = D3DDECLTYPE_FLOAT4;
+	elements[3].Offset = 16;
+	elements[3].Type = D3DDECLTYPE_UBYTE4;
 	elements[3].Method = D3DDECLMETHOD_DEFAULT;
 	elements[3].Usage = D3DDECLUSAGE_TEXCOORD;
 	elements[3].UsageIndex = 1;
@@ -2109,7 +2142,7 @@ internal void NativeRenderer_SetWireframe(int enable)
 {
 	if (s_device != NULL)
 	{
-		IDirect3DDevice9_SetRenderState(s_device, D3DRS_FILLMODE, enable ? D3DFILL_WIREFRAME : D3DFILL_SOLID);
+		Ctr360_SetRenderState(s_device, D3DRS_FILLMODE, enable ? D3DFILL_WIREFRAME : D3DFILL_SOLID);
 	}
 }
 
@@ -2127,7 +2160,7 @@ internal void NativeRenderer_Ortho2D(float left, float right, float bottom, floa
 
 	if ((s_device != NULL) && (s_previousShader != (ShaderID)-1))
 	{
-		IDirect3DDevice9_SetVertexShaderConstantF(s_device, X360_PSX_VS_PROJECTION_C0, ortho, 4);
+		Ctr360_SetVertexShaderConstantF(s_device, X360_PSX_VS_PROJECTION_C0, ortho, 4);
 	}
 }
 
@@ -2229,7 +2262,7 @@ internal void NativeRenderer_SetScissorState(int enable)
 
 	if (s_device != NULL)
 	{
-		IDirect3DDevice9_SetRenderState(s_device, D3DRS_SCISSORTESTENABLE, enable ? TRUE : FALSE);
+		Ctr360_SetRenderState(s_device, D3DRS_SCISSORTESTENABLE, enable ? TRUE : FALSE);
 	}
 }
 
@@ -2244,7 +2277,7 @@ internal void NativeRenderer_EnableDepth(int enable)
 
 	if (s_device != NULL)
 	{
-		IDirect3DDevice9_SetRenderState(s_device, D3DRS_ZENABLE, FALSE);
+		Ctr360_SetRenderState(s_device, D3DRS_ZENABLE, FALSE);
 	}
 }
 
@@ -2264,23 +2297,23 @@ void NativeRenderer_SetStencilMode(int drawPrim)
 
 	if (drawPrim)
 	{
-		IDirect3DDevice9_SetRenderState(s_device, D3DRS_STENCILFUNC, D3DCMP_ALWAYS);
-		IDirect3DDevice9_SetRenderState(s_device, D3DRS_STENCILREF, 1);
-		IDirect3DDevice9_SetRenderState(s_device, D3DRS_STENCILMASK, 0x10);
-		IDirect3DDevice9_SetRenderState(s_device, D3DRS_STENCILWRITEMASK, 0xFF);
-		IDirect3DDevice9_SetRenderState(s_device, D3DRS_STENCILFAIL, D3DSTENCILOP_REPLACE);
-		IDirect3DDevice9_SetRenderState(s_device, D3DRS_STENCILZFAIL, D3DSTENCILOP_REPLACE);
-		IDirect3DDevice9_SetRenderState(s_device, D3DRS_STENCILPASS, D3DSTENCILOP_REPLACE);
+		Ctr360_SetRenderState(s_device, D3DRS_STENCILFUNC, D3DCMP_ALWAYS);
+		Ctr360_SetRenderState(s_device, D3DRS_STENCILREF, 1);
+		Ctr360_SetRenderState(s_device, D3DRS_STENCILMASK, 0x10);
+		Ctr360_SetRenderState(s_device, D3DRS_STENCILWRITEMASK, 0xFF);
+		Ctr360_SetRenderState(s_device, D3DRS_STENCILFAIL, D3DSTENCILOP_REPLACE);
+		Ctr360_SetRenderState(s_device, D3DRS_STENCILZFAIL, D3DSTENCILOP_REPLACE);
+		Ctr360_SetRenderState(s_device, D3DRS_STENCILPASS, D3DSTENCILOP_REPLACE);
 	}
 	else
 	{
-		IDirect3DDevice9_SetRenderState(s_device, D3DRS_STENCILFUNC, D3DCMP_NOTEQUAL);
-		IDirect3DDevice9_SetRenderState(s_device, D3DRS_STENCILREF, 1);
-		IDirect3DDevice9_SetRenderState(s_device, D3DRS_STENCILMASK, 0xFF);
-		IDirect3DDevice9_SetRenderState(s_device, D3DRS_STENCILWRITEMASK, 0xFF);
-		IDirect3DDevice9_SetRenderState(s_device, D3DRS_STENCILFAIL, D3DSTENCILOP_REPLACE);
-		IDirect3DDevice9_SetRenderState(s_device, D3DRS_STENCILZFAIL, D3DSTENCILOP_KEEP);
-		IDirect3DDevice9_SetRenderState(s_device, D3DRS_STENCILPASS, D3DSTENCILOP_KEEP);
+		Ctr360_SetRenderState(s_device, D3DRS_STENCILFUNC, D3DCMP_NOTEQUAL);
+		Ctr360_SetRenderState(s_device, D3DRS_STENCILREF, 1);
+		Ctr360_SetRenderState(s_device, D3DRS_STENCILMASK, 0xFF);
+		Ctr360_SetRenderState(s_device, D3DRS_STENCILWRITEMASK, 0xFF);
+		Ctr360_SetRenderState(s_device, D3DRS_STENCILFAIL, D3DSTENCILOP_REPLACE);
+		Ctr360_SetRenderState(s_device, D3DRS_STENCILZFAIL, D3DSTENCILOP_KEEP);
+		Ctr360_SetRenderState(s_device, D3DRS_STENCILPASS, D3DSTENCILOP_KEEP);
 	}
 }
 
@@ -2302,8 +2335,8 @@ void NativeRenderer_SetBlendMode(BlendMode blendMode)
 		if (s_previousBlendMode == BM_NONE)
 		{
 			/* GL sets blendColor(0.25,0.25,0.25,0.5) on this transition. */
-			IDirect3DDevice9_SetRenderState(s_device, D3DRS_BLENDFACTOR, D3DCOLOR_ARGB(128, 64, 64, 64));
-			IDirect3DDevice9_SetRenderState(s_device, D3DRS_ALPHABLENDENABLE, TRUE);
+			Ctr360_SetRenderState(s_device, D3DRS_BLENDFACTOR, D3DCOLOR_ARGB(128, 64, 64, 64));
+			Ctr360_SetRenderState(s_device, D3DRS_ALPHABLENDENABLE, TRUE);
 		}
 
 		NativeRenderer_EnableDepth(0);
@@ -2314,38 +2347,38 @@ void NativeRenderer_SetBlendMode(BlendMode blendMode)
 	case BM_NONE:
 		if (s_previousBlendMode != BM_NONE)
 		{
-			IDirect3DDevice9_SetRenderState(s_device, D3DRS_BLENDFACTOR, D3DCOLOR_ARGB(255, 255, 255, 255));
-			IDirect3DDevice9_SetRenderState(s_device, D3DRS_ALPHABLENDENABLE, FALSE);
+			Ctr360_SetRenderState(s_device, D3DRS_BLENDFACTOR, D3DCOLOR_ARGB(255, 255, 255, 255));
+			Ctr360_SetRenderState(s_device, D3DRS_ALPHABLENDENABLE, FALSE);
 		}
 
 		NativeRenderer_EnableDepth(1);
 		break;
 	case BM_AVERAGE:
 		/* D3D uses BLENDFACTOR RGB; GL used CONSTANT_ALPHA = 0.5. */
-		IDirect3DDevice9_SetRenderState(s_device, D3DRS_BLENDFACTOR, D3DCOLOR_ARGB(128, 128, 128, 128));
-		IDirect3DDevice9_SetRenderState(s_device, D3DRS_BLENDOP, D3DBLENDOP_ADD);
-		IDirect3DDevice9_SetRenderState(s_device, D3DRS_BLENDOPALPHA, D3DBLENDOP_ADD);
-		IDirect3DDevice9_SetRenderState(s_device, D3DRS_SRCBLEND, D3DBLEND_BLENDFACTOR);
-		IDirect3DDevice9_SetRenderState(s_device, D3DRS_DESTBLEND, D3DBLEND_INVBLENDFACTOR);
+		Ctr360_SetRenderState(s_device, D3DRS_BLENDFACTOR, D3DCOLOR_ARGB(128, 128, 128, 128));
+		Ctr360_SetRenderState(s_device, D3DRS_BLENDOP, D3DBLENDOP_ADD);
+		Ctr360_SetRenderState(s_device, D3DRS_BLENDOPALPHA, D3DBLENDOP_ADD);
+		Ctr360_SetRenderState(s_device, D3DRS_SRCBLEND, D3DBLEND_BLENDFACTOR);
+		Ctr360_SetRenderState(s_device, D3DRS_DESTBLEND, D3DBLEND_INVBLENDFACTOR);
 		break;
 	case BM_ADD:
-		IDirect3DDevice9_SetRenderState(s_device, D3DRS_BLENDOP, D3DBLENDOP_ADD);
-		IDirect3DDevice9_SetRenderState(s_device, D3DRS_BLENDOPALPHA, D3DBLENDOP_ADD);
-		IDirect3DDevice9_SetRenderState(s_device, D3DRS_SRCBLEND, D3DBLEND_ONE);
-		IDirect3DDevice9_SetRenderState(s_device, D3DRS_DESTBLEND, D3DBLEND_ONE);
+		Ctr360_SetRenderState(s_device, D3DRS_BLENDOP, D3DBLENDOP_ADD);
+		Ctr360_SetRenderState(s_device, D3DRS_BLENDOPALPHA, D3DBLENDOP_ADD);
+		Ctr360_SetRenderState(s_device, D3DRS_SRCBLEND, D3DBLEND_ONE);
+		Ctr360_SetRenderState(s_device, D3DRS_DESTBLEND, D3DBLEND_ONE);
 		break;
 	case BM_SUBTRACT:
-		IDirect3DDevice9_SetRenderState(s_device, D3DRS_BLENDOP, D3DBLENDOP_REVSUBTRACT);
-		IDirect3DDevice9_SetRenderState(s_device, D3DRS_BLENDOPALPHA, D3DBLENDOP_ADD);
-		IDirect3DDevice9_SetRenderState(s_device, D3DRS_SRCBLEND, D3DBLEND_ONE);
-		IDirect3DDevice9_SetRenderState(s_device, D3DRS_DESTBLEND, D3DBLEND_ONE);
+		Ctr360_SetRenderState(s_device, D3DRS_BLENDOP, D3DBLENDOP_REVSUBTRACT);
+		Ctr360_SetRenderState(s_device, D3DRS_BLENDOPALPHA, D3DBLENDOP_ADD);
+		Ctr360_SetRenderState(s_device, D3DRS_SRCBLEND, D3DBLEND_ONE);
+		Ctr360_SetRenderState(s_device, D3DRS_DESTBLEND, D3DBLEND_ONE);
 		break;
 	case BM_ADD_QUATER_SOURCE:
-		IDirect3DDevice9_SetRenderState(s_device, D3DRS_BLENDFACTOR, D3DCOLOR_ARGB(128, 64, 64, 64));
-		IDirect3DDevice9_SetRenderState(s_device, D3DRS_BLENDOP, D3DBLENDOP_ADD);
-		IDirect3DDevice9_SetRenderState(s_device, D3DRS_BLENDOPALPHA, D3DBLENDOP_ADD);
-		IDirect3DDevice9_SetRenderState(s_device, D3DRS_SRCBLEND, D3DBLEND_BLENDFACTOR);
-		IDirect3DDevice9_SetRenderState(s_device, D3DRS_DESTBLEND, D3DBLEND_ONE);
+		Ctr360_SetRenderState(s_device, D3DRS_BLENDFACTOR, D3DCOLOR_ARGB(128, 64, 64, 64));
+		Ctr360_SetRenderState(s_device, D3DRS_BLENDOP, D3DBLENDOP_ADD);
+		Ctr360_SetRenderState(s_device, D3DRS_BLENDOPALPHA, D3DBLENDOP_ADD);
+		Ctr360_SetRenderState(s_device, D3DRS_SRCBLEND, D3DBLEND_BLENDFACTOR);
+		Ctr360_SetRenderState(s_device, D3DRS_DESTBLEND, D3DBLEND_ONE);
 		break;
 	}
 
@@ -2374,14 +2407,14 @@ internal void NativeRenderer_UploadPSXFlags(void)
 	flags[1] = 0.0f; /* psxSemiTransPass, set by the caller below */
 	flags[2] = 0.0f; /* psxDrawMaskSet */
 	flags[3] = 0.0f; /* psxTextureOutputStp */
-	IDirect3DDevice9_SetPixelShaderConstantF(s_device, X360_PSX_PS_BILINEAR_C0, &flags[0], 1);
+	Ctr360_SetPixelShaderConstantF(s_device, X360_PSX_PS_BILINEAR_C0, &flags[0], 1);
 }
 
 internal void NativeRenderer_UploadDitherTable(void)
 {
 	if (s_device != NULL)
 	{
-		IDirect3DDevice9_SetPixelShaderConstantF(s_device, X360_PSX_PS_DITHER_C4, s_ditherTable, 4);
+		Ctr360_SetPixelShaderConstantF(s_device, X360_PSX_PS_DITHER_C4, s_ditherTable, 4);
 	}
 }
 
@@ -2438,7 +2471,7 @@ void NativeRenderer_SetTexture(TextureID texture, TexFormat texFormat)
 	if (s_device != NULL)
 	{
 		float bilinear[4] = {(g_cfg_bilinearFiltering != 0 && !s_uiPass && !s_previousOffscreenState) ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f};
-		IDirect3DDevice9_SetPixelShaderConstantF(s_device, X360_PSX_PS_BILINEAR_C0, bilinear, 1);
+		Ctr360_SetPixelShaderConstantF(s_device, X360_PSX_PS_BILINEAR_C0, bilinear, 1);
 	}
 	NativeRenderer_SetPSXTextureSemiTransPass(0);
 
@@ -2469,7 +2502,7 @@ void NativeRenderer_SetOverrideTextureSize(int width, int height)
 	vec[1] = 1.0f / (float)height;
 	vec[2] = 0.0f;
 	vec[3] = 0.0f;
-	IDirect3DDevice9_SetPixelShaderConstantF(s_device, X360_PSX_PS_TEXELSIZE_C16, vec, 1);
+	Ctr360_SetPixelShaderConstantF(s_device, X360_PSX_PS_TEXELSIZE_C16, vec, 1);
 }
 
 void NativeRenderer_SetPSXTextureSemiTransPass(int pass)
@@ -2477,7 +2510,7 @@ void NativeRenderer_SetPSXTextureSemiTransPass(int pass)
 	if (s_device != NULL)
 	{
 		float value[4] = {(float)pass, 0.0f, 0.0f, 0.0f};
-		IDirect3DDevice9_SetPixelShaderConstantF(s_device, X360_PSX_PS_SEMITRANS_C1, value, 1);
+		Ctr360_SetPixelShaderConstantF(s_device, X360_PSX_PS_SEMITRANS_C1, value, 1);
 	}
 }
 
@@ -2486,7 +2519,7 @@ void NativeRenderer_SetPSXTextureOutputSTP(int enabled)
 	if (s_device != NULL)
 	{
 		float value[4] = {(float)enabled, 0.0f, 0.0f, 0.0f};
-		IDirect3DDevice9_SetPixelShaderConstantF(s_device, X360_PSX_PS_OUTPUTSTP_C3, value, 1);
+		Ctr360_SetPixelShaderConstantF(s_device, X360_PSX_PS_OUTPUTSTP_C3, value, 1);
 	}
 }
 
@@ -2495,7 +2528,7 @@ void NativeRenderer_SetPSXDrawMaskSet(int maskSet)
 	if (s_device != NULL)
 	{
 		float value[4] = {(float)maskSet, 0.0f, 0.0f, 0.0f};
-		IDirect3DDevice9_SetPixelShaderConstantF(s_device, X360_PSX_PS_MASKSET_C2, value, 1);
+		Ctr360_SetPixelShaderConstantF(s_device, X360_PSX_PS_MASKSET_C2, value, 1);
 	}
 }
 
@@ -2566,11 +2599,8 @@ void NativeRenderer_UpdateVertexBuffer(const GrVertex *vertices, int num_vertice
 		return;
 	}
 
-	/* IDirect3DVertexBuffer9_Lock expands the packed GrVertex into the float
-	 * vertex format the shaders consume. GL fed the packed struct straight to
-	 * the vertex fetcher with per-attribute types; the 360 path declares four
-	 * FLOAT4 attributes, so the expansion happens here, once per upload, and
-	 * keeps every value bit-identical to what GLSL saw. */
+	/* Packed vertex fetch removes the CPU expansion and 44 bytes of traffic
+     * per vertex. Signed UV edge corrections are decoded in the shader. */
 	if (s_vbTrace <= 12) { Platform_Log("[trace] vb: locking bytes=%d\n", (int)(num_vertices * (int)sizeof(X360Vertex))); }
     /* These buffers are reused from offset zero. Let XDK synchronize a busy
      * resource; NOOVERWRITE would promise not to overwrite in-flight data. */
@@ -2582,29 +2612,7 @@ void NativeRenderer_UpdateVertexBuffer(const GrVertex *vertices, int num_vertice
 		return;
 	}
 
-	{
-		int i;
-		for (i = 0; i < num_vertices; i++)
-		{
-			const GrVertex *v = &vertices[i];
-			out[i].x = (f32)v->x;
-			out[i].y = (f32)v->y;
-			out[i].page = (f32)v->page;
-			out[i].clut = (f32)v->clut;
-			out[i].u = (f32)v->u;
-			out[i].v = (f32)v->v;
-			out[i].bright = (f32)v->bright;
-			out[i].dither = (f32)v->dither;
-			out[i].r = (f32)v->r / 255.0f;
-			out[i].g = (f32)v->g / 255.0f;
-			out[i].b = (f32)v->b / 255.0f;
-			out[i].a = (f32)v->a / 255.0f;
-			out[i].tcx = (f32)v->tcx;
-			out[i].tcy = (f32)v->tcy;
-			out[i].p0 = (f32)v->_p0;
-			out[i].p1 = (f32)v->_p1;
-		}
-	}
+	memcpy(out, vertices, num_vertices * sizeof(X360Vertex));
 
 	IDirect3DVertexBuffer9_Unlock(s_vertexBuffer[bufferIndex]);
 	if (s_vbTrace <= 12) { Platform_Log("[trace] vb: unlocked\n"); }
@@ -2636,7 +2644,7 @@ void NativeRenderer_DrawTriangles(int start_vertex, int triangles)
 
     {
         float drawScale[4] = {s_uiPass ? 0.75f : 1.0f, (float)activeDispEnv.disp.w * 0.5f, s_previousOffscreenState ? 1.0f : 0.0f, 0.0f};
-        IDirect3DDevice9_SetVertexShaderConstantF(s_device, 18, drawScale, 1);
+        Ctr360_SetVertexShaderConstantF(s_device, 18, drawScale, 1);
     }
 	NativeRenderer_UploadDitherTable();
 
@@ -2666,7 +2674,7 @@ internal void NativeRenderer_DrawFullscreenQuad(float posFlipY)
 	flipConst[2] = 0.0f;
 	flipConst[3] = 0.0f;
 
-	IDirect3DDevice9_SetVertexShaderConstantF(s_device, X360_QUAD_VS_FLIP_C16, flipConst, 1);
+	Ctr360_SetVertexShaderConstantF(s_device, X360_QUAD_VS_FLIP_C16, flipConst, 1);
 	IDirect3DDevice9_SetVertexDeclaration(s_device, s_quadVertexDecl);
 	Platform_Log("[trace] dfq: flip const set\n");
 	IDirect3DDevice9_DrawPrimitiveUP(s_device, D3DPT_TRIANGLELIST, 2, quad, 2 * sizeof(float));
@@ -2691,7 +2699,7 @@ internal void NativeRenderer_DrawVRAMRegion(int x, int y, int width, int height)
 	IDirect3DDevice9_SetVertexShader(s_device, s_presentVertexShader);
 	IDirect3DDevice9_SetPixelShader(s_device, s_presentPixelShader);
 	IDirect3DDevice9_SetTexture(s_device, 0, (D3DBaseTexture *)s_vram.texture);
-	IDirect3DDevice9_SetVertexShaderConstantF(s_device, X360_PRESENT_VS_RECT_C17, sourceRect, 1);
+	Ctr360_SetVertexShaderConstantF(s_device, X360_PRESENT_VS_RECT_C17, sourceRect, 1);
 	NativeRenderer_DrawFullscreenQuad(flip);
 
 	s_previousShader = (ShaderID)-1;
@@ -2711,8 +2719,8 @@ internal void NativeRenderer_LoadRenderTargetFromVRAM(struct X360RenderTarget *t
 	NativeRenderer_SetRenderTarget(target);
 	NativeRenderer_SetScissorState(0);
 	NativeRenderer_SetViewPort(0, 0, target->width, target->height);
-	IDirect3DDevice9_SetRenderState(s_device, D3DRS_STENCILENABLE, FALSE);
-	IDirect3DDevice9_SetRenderState(s_device, D3DRS_ALPHABLENDENABLE, FALSE);
+	Ctr360_SetRenderState(s_device, D3DRS_STENCILENABLE, FALSE);
+	Ctr360_SetRenderState(s_device, D3DRS_ALPHABLENDENABLE, FALSE);
 	NativeRenderer_DrawVRAMRegion(x, y,
         target == &s_mainRenderTarget ? activeDispEnv.disp.w : target->width,
         target == &s_mainRenderTarget ? activeDispEnv.disp.h : target->height);
@@ -2731,7 +2739,7 @@ internal void NativeRenderer_LoadRenderTargetFromVRAM(struct X360RenderTarget *t
 	s_previousScissorState = 0;
 	NativeRenderer_SetBlendMode(previousBlendMode);
 	NativeRenderer_SetScissorState(previousScissorState);
-	IDirect3DDevice9_SetRenderState(s_device, D3DRS_STENCILENABLE, TRUE);
+	Ctr360_SetRenderState(s_device, D3DRS_STENCILENABLE, TRUE);
 }
 
 internal void NativeRenderer_GpuPackTextureToVRAM(D3DTexture *sourceTexture, int x, int y, int w, int h, b32 flipY)
@@ -2759,11 +2767,11 @@ internal void NativeRenderer_GpuPackTextureToVRAM(D3DTexture *sourceTexture, int
 	NativeRenderer_SetScissorState(0);
 	/* The bridge needs an unconditionally disabled scissor even when the cache
 	 * was desynchronized by another D3D pass. */
-	IDirect3DDevice9_SetRenderState(s_device, D3DRS_SCISSORTESTENABLE, FALSE);
+	Ctr360_SetRenderState(s_device, D3DRS_SCISSORTESTENABLE, FALSE);
 	/* The pack pass has no depth/stencil attachment and must replace the RG8
 	 * destination bytes, regardless of the last game primitive's blend mode. */
-	IDirect3DDevice9_SetRenderState(s_device, D3DRS_STENCILENABLE, FALSE);
-	IDirect3DDevice9_SetRenderState(s_device, D3DRS_ALPHABLENDENABLE, FALSE);
+	Ctr360_SetRenderState(s_device, D3DRS_STENCILENABLE, FALSE);
+	Ctr360_SetRenderState(s_device, D3DRS_ALPHABLENDENABLE, FALSE);
 	/* The EDRAM target is shared with the main framebuffer. Seed all VRAM
 	 * pixels from its main-memory texture before writing this subrectangle. */
 	NativeRenderer_SetViewPort(0, 0, VRAM_WIDTH, VRAM_HEIGHT);
@@ -2779,8 +2787,8 @@ internal void NativeRenderer_GpuPackTextureToVRAM(D3DTexture *sourceTexture, int
 	IDirect3DDevice9_SetVertexShader(s_device, s_packVertexShader);
 	IDirect3DDevice9_SetPixelShader(s_device, s_packPixelShader);
 	IDirect3DDevice9_SetTexture(s_device, 0, (D3DBaseTexture *)sourceTexture);
-	IDirect3DDevice9_SetPixelShaderConstantF(s_device, X360_PACK_PS_FLIPY_C0, flipYVector, 1);
-	IDirect3DDevice9_SetPixelShaderConstantF(s_device, 1, diagnosticSolid, 1);
+	Ctr360_SetPixelShaderConstantF(s_device, X360_PACK_PS_FLIPY_C0, flipYVector, 1);
+	Ctr360_SetPixelShaderConstantF(s_device, 1, diagnosticSolid, 1);
 	Platform_Log("[trace] pack: before pack draw\n");
 	NativeRenderer_DrawFullscreenQuad(-1.0f); /* texture destination */
 	Platform_Log("[trace] pack: after pack draw\n");
@@ -2810,7 +2818,7 @@ internal void NativeRenderer_GpuPackTextureToVRAM(D3DTexture *sourceTexture, int
 	s_previousScissorState = 0;
 	NativeRenderer_SetBlendMode(previousBlendMode);
 	NativeRenderer_SetScissorState(previousScissorState);
-	IDirect3DDevice9_SetRenderState(s_device, D3DRS_STENCILENABLE, TRUE);
+	Ctr360_SetRenderState(s_device, D3DRS_STENCILENABLE, TRUE);
 	NativeRenderer_MarkGpuVRAMNewer(x, y, w, h);
 }
 
@@ -3182,7 +3190,7 @@ void NativeRenderer_PresentVRAMRect(int displayX, int displayY, int displayW, in
         NativeRenderer_SetScissorState(0);
         NativeRenderer_EnableDepth(0);
         NativeRenderer_SetBlendMode(BM_NONE);
-        IDirect3DDevice9_SetRenderState(s_device, D3DRS_STENCILENABLE, FALSE);
+        Ctr360_SetRenderState(s_device, D3DRS_STENCILENABLE, FALSE);
         IDirect3DDevice9_SetVertexShader(s_device, s_packVertexShader);
         IDirect3DDevice9_SetPixelShader(s_device, s_hdEdgeAA ? s_hdPresentPixelShader : s_vramCopyPixelShader);
         IDirect3DDevice9_SetTexture(s_device, 0, (D3DBaseTexture *)s_mainRenderTarget.texture);
@@ -3192,7 +3200,7 @@ void NativeRenderer_PresentVRAMRect(int displayX, int displayY, int displayW, in
         NativeRenderer_DebugHDOutput();
         IDirect3DDevice9_SetSamplerState(s_device, 0, D3DSAMP_MINFILTER, D3DTEXF_POINT);
         IDirect3DDevice9_SetSamplerState(s_device, 0, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
-        IDirect3DDevice9_SetRenderState(s_device, D3DRS_STENCILENABLE, TRUE);
+        Ctr360_SetRenderState(s_device, D3DRS_STENCILENABLE, TRUE);
         s_previousShader = (ShaderID)-1;
         s_lastBoundTexture = (TextureID)-1;
         return;
@@ -3218,7 +3226,7 @@ void NativeRenderer_PresentVRAMRect(int displayX, int displayY, int displayW, in
 	Platform_Log("[trace] pvr: shaders set\n");
 	IDirect3DDevice9_SetTexture(s_device, 0, (D3DBaseTexture *)s_vram.texture);
 	Platform_Log("[trace] pvr: texture set\n");
-	IDirect3DDevice9_SetVertexShaderConstantF(s_device, X360_PRESENT_VS_RECT_C17, sourceRect, 1);
+	Ctr360_SetVertexShaderConstantF(s_device, X360_PRESENT_VS_RECT_C17, sourceRect, 1);
 	Platform_Log("[trace] pvr: consts set\n");
 
 	NativeRenderer_DrawFullscreenQuad(flip);

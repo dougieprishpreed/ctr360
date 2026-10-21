@@ -141,6 +141,8 @@ Each graphics value accepts `0` (off) or `1` (on). The older `assets/ctr360_grap
 - `texture_filter`: smooths world textures.
 - `edge_aa`: smooths polygon edges.
 
+Frame rate varies with the scene. To reduce graphics cost, try `edge_aa = 0`, then `texture_filter = 0`. The 60 FPS option changes rendering cadence; race logic and timers retain their original rate.
+
 World geometry uses an expanded 16:9 projection. The original HUD and menu layout retain their authored proportions. Texture filtering improves sampling; it does not replace the original textures with higher-detail artwork.
 
 The `[controls]` section maps original PlayStation buttons to Xbox controls for all controllers. For example, `cross = RT` moves accelerate/confirm to the right trigger, and `r2 = A` moves R2 to A. Available buttons are `A B X Y LB RB LT RT LS RS START BACK DPAD_UP DPAD_DOWN DPAD_LEFT DPAD_RIGHT NONE`. Stick axes use `LEFT_X LEFT_Y RIGHT_X RIGHT_Y`; prefix an axis with `-` to invert it. The supplied example lists every destination and default. Names are case sensitive. The physical **Back + Start** exit shortcut stays active regardless of remapping.

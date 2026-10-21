@@ -34,10 +34,10 @@ CTR_STATIC_ASSERT(offsetof(XvVertex, tcx) == 16);
 static struct {
     VkInstance instance;VkPhysicalDevice physical;VkDevice device;VkQueue queue;
     VkSurfaceKHR surface;VkSwapchainKHR swapchain;unsigned imageCount;
-    XvTarget swap[3],main,off,vram,white;
+    XvTarget swap[3],main,off,vram;
     VkRenderPass passes[3];VkCommandPool pool;VkCommandBuffer command;VkFence fence;
     VkDescriptorSetLayout setLayout;VkPipelineLayout pipelineLayout;VkDescriptorPool descriptors;
-    VkDescriptorSet sets[5];VkSampler sampler,linearSampler;
+    VkDescriptorSet sets[4];VkSampler sampler,linearSampler;
     VkShaderModule shaders[4];VkPipeline pipelines[3][2][5][3];
     XvBuffer vertices,uniforms,staging;
     unsigned vertexCursor,vertexBase,vertexCount,uniformCursor,uniformAlignment;
@@ -208,7 +208,7 @@ static void XvQuad(XvTarget *to,XvTarget *from,int mode,int x,int y,int width,in
     VkRect2D clip={{x,y},{width,height}};vkCmdSetViewport(xv.command,0,1,&vp);vkCmdSetScissor(xv.command,0,1,&clip);
     XvUniform state={0};state.scale[3]=(float)mode;
     state.source[0]=sx;state.source[1]=sy;state.source[2]=sw;state.source[3]=sh;
-    unsigned texture=from==&xv.vram?0:from==&xv.main?(mode==3?4:1):2;
+    unsigned texture=from==&xv.vram?0:from==&xv.main?(mode==3?3:1):2;
     XvBindUniform(&state,texture);vkCmdBindPipeline(xv.command,VK_PIPELINE_BIND_POINT_GRAPHICS,XvPipeline(to->pass,1,BM_NONE,0));
     VkDeviceSize quadOffset=XV_VERTEX_BYTES;vkCmdBindVertexBuffers(xv.command,0,1,&xv.vertices.buffer,&quadOffset);
     vkCmdDraw(xv.command,4,1,0,0);
@@ -304,7 +304,10 @@ int NativeRenderer_InitialiseRender(char *name,int width,int height,int fullscre
         VkFramebufferCreateInfo fb={.sType=VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,.renderPass=xv.passes[2],.attachmentCount=1,
             .pAttachments=&t->view,.width=XV_WIDTH,.height=XV_HEIGHT,.layers=1};XV_CALL(vkCreateFramebuffer(xv.device,&fb,NULL,&t->framebuffer));
     }
-    XvImage(&xv.main,XV_WIDTH,XV_HEIGHT,1);XvImage(&xv.off,1024,512,1);XvImage(&xv.vram,1024,512,0);XvImage(&xv.white,1,1,0);
+    /* Flat primitives return white in psx.frag; no dummy render target is needed. */
+    Platform_Log("[vulkan] creating main, offscreen and VRAM targets\n");
+    XvImage(&xv.main,XV_WIDTH,XV_HEIGHT,1);XvImage(&xv.off,1024,512,1);XvImage(&xv.vram,1024,512,0);
+    Platform_Log("[vulkan] targets ready; creating upload buffers and descriptors\n");
     XvBufferCreate(&xv.vertices,XV_VERTEX_BYTES+4*sizeof(XvQuadVertex),VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
     XvQuadVertex *quad=(XvQuadVertex *)(xv.vertices.map+XV_VERTEX_BYTES);
     memset(quad,0,4*sizeof(*quad));quad[1].position[1]=1;quad[2].position[0]=1;quad[3].position[0]=1;quad[3].position[1]=1;
@@ -316,30 +319,33 @@ int NativeRenderer_InitialiseRender(char *name,int width,int height,int fullscre
     VkDescriptorSetLayoutCreateInfo layout={.sType=VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,.bindingCount=2,.pBindings=bindings};
     XV_CALL(vkCreateDescriptorSetLayout(xv.device,&layout,NULL,&xv.setLayout));
     VkPipelineLayoutCreateInfo pl={.sType=VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,.setLayoutCount=1,.pSetLayouts=&xv.setLayout};XV_CALL(vkCreatePipelineLayout(xv.device,&pl,NULL,&xv.pipelineLayout));
-    VkDescriptorPoolSize sizes[]={{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,5},{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,5}};
-    VkDescriptorPoolCreateInfo dp={.sType=VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,.maxSets=5,.poolSizeCount=2,.pPoolSizes=sizes};XV_CALL(vkCreateDescriptorPool(xv.device,&dp,NULL,&xv.descriptors));
+    VkDescriptorPoolSize sizes[]={{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,4},{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,4}};
+    VkDescriptorPoolCreateInfo dp={.sType=VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,.maxSets=4,.poolSizeCount=2,.pPoolSizes=sizes};XV_CALL(vkCreateDescriptorPool(xv.device,&dp,NULL,&xv.descriptors));
     VkSamplerCreateInfo sampler={.sType=VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,.magFilter=VK_FILTER_NEAREST,.minFilter=VK_FILTER_NEAREST,
         .mipmapMode=VK_SAMPLER_MIPMAP_MODE_NEAREST,.addressModeU=VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,.addressModeV=VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,.addressModeW=VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE};
     XV_CALL(vkCreateSampler(xv.device,&sampler,NULL,&xv.sampler));
     sampler.minFilter=VK_FILTER_LINEAR;sampler.magFilter=VK_FILTER_LINEAR;
     XV_CALL(vkCreateSampler(xv.device,&sampler,NULL,&xv.linearSampler));
-    XvTarget *textures[]={&xv.vram,&xv.main,&xv.off,&xv.white,&xv.main};
-    for(unsigned i=0;i<5;i++){
+    XvTarget *textures[]={&xv.vram,&xv.main,&xv.off,&xv.main};
+    for(unsigned i=0;i<4;i++){
         VkDescriptorSetAllocateInfo alloc={.sType=VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,.descriptorPool=xv.descriptors,.descriptorSetCount=1,.pSetLayouts=&xv.setLayout};
         XV_CALL(vkAllocateDescriptorSets(xv.device,&alloc,&xv.sets[i]));
         VkDescriptorBufferInfo buffer={xv.uniforms.buffer,0,sizeof(XvUniform)};
-        VkDescriptorImageInfo image={i==4?xv.linearSampler:xv.sampler,textures[i]->view,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkDescriptorImageInfo image={i==3?xv.linearSampler:xv.sampler,textures[i]->view,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkWriteDescriptorSet writes[]={
             {.sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,.dstSet=xv.sets[i],.dstBinding=0,.descriptorCount=1,.descriptorType=VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,.pBufferInfo=&buffer},
             {.sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,.dstSet=xv.sets[i],.dstBinding=1,.descriptorCount=1,.descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,.pImageInfo=&image}};
         vkUpdateDescriptorSets(xv.device,2,writes,0,NULL);
     }
+    Platform_Log("[vulkan] descriptors ready; loading bundled shaders\n");
     const uint32_t *code[]={psx_vert_spirv,psx_frag_spirv,quad_vert_spirv,quad_frag_spirv};
     const unsigned bytes[]={PSX_VERT_SPIRV_BYTES,PSX_FRAG_SPIRV_BYTES,QUAD_VERT_SPIRV_BYTES,QUAD_FRAG_SPIRV_BYTES};
     for(unsigned i=0;i<4;i++){VkShaderModuleCreateInfo info={.sType=VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,.codeSize=bytes[i],.pCode=code[i]};XV_CALL(vkCreateShaderModule(xv.device,&info,NULL,&xv.shaders[i]));}
+    Platform_Log("[vulkan] shaders ready; creating graphics pipelines\n");
     /* Pre-create the small state combinations outside the race frame loop. */
     for(unsigned blend=0;blend<5;blend++)for(unsigned mask=1;mask<3;mask++)XvPipeline(0,0,(BlendMode)blend,mask);
     for(unsigned pass=0;pass<3;pass++)XvPipeline(pass,1,BM_NONE,0);
+    Platform_Log("[vulkan] pipelines ready; submitting initial clears\n");
     XvSubmit();xv.state.rect[2]=512;xv.state.rect[3]=216;xv.state.scale[0]=1;xv.vramCPUChanged=1;
     Platform_Log("[vulkan] 720p renderer initialized (experimental)\n");return 1;
 }
@@ -557,7 +563,7 @@ void NativeRenderer_Shutdown(void)
     for(unsigned p=0;p<3;p++)for(unsigned q=0;q<2;q++)for(unsigned b=0;b<5;b++)for(unsigned st=0;st<3;st++)
         if(xv.pipelines[p][q][b][st])vkDestroyPipeline(xv.device,xv.pipelines[p][q][b][st],NULL);
     for(unsigned i=0;i<4;i++)if(xv.shaders[i])vkDestroyShaderModule(xv.device,xv.shaders[i],NULL);
-    XvDestroyTarget(&xv.main);XvDestroyTarget(&xv.off);XvDestroyTarget(&xv.vram);XvDestroyTarget(&xv.white);
+    XvDestroyTarget(&xv.main);XvDestroyTarget(&xv.off);XvDestroyTarget(&xv.vram);
     for(unsigned i=0;i<xv.imageCount;i++)XvDestroyTarget(&xv.swap[i]);
     XvBuffer *buffers[]={&xv.vertices,&xv.uniforms,&xv.staging};
     for(unsigned i=0;i<3;i++){vkUnmapMemory(xv.device,buffers[i]->memory);vkDestroyBuffer(xv.device,buffers[i]->buffer,NULL);vkFreeMemory(xv.device,buffers[i]->memory,NULL);}

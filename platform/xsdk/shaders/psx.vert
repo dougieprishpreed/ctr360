@@ -6,8 +6,8 @@ layout(location=3) in vec4 extra;
 layout(set=0,binding=0,std140) uniform State { vec4 rect; vec4 scale; vec4 flags; vec4 source; } s;
 layout(location=0) out vec4 tc;
 layout(location=1) out vec4 rgba;
-layout(location=2) out vec4 page;
-layout(location=3) out vec2 dc;
+layout(location=2) out vec2 dc;
+layout(location=3) out vec4 page;
 void main() {
     vec2 xy=position.xy;
     xy.x=(xy.x-s.scale.y)*s.scale.x+s.scale.y;

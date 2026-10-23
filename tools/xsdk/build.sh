@@ -13,13 +13,15 @@ python3 "$ROOT/tools/ctr360/audit_endian_source.py" --report "$OUT/endian-source
 python3 "$ROOT/tools/xsdk/verify_deps.py" "$XSDK" "$VULKAN4XENON"
 python3 "$ROOT/tools/xsdk/test_vertex_fetch.py" --xsdk "$XSDK" --vulkan "$VULKAN4XENON"
 python3 "$ROOT/tools/xsdk/test_render_targets.py" --vulkan "$VULKAN4XENON" --out "$OUT/target-tests"
+python3 "$ROOT/tools/xsdk/test_render_memory.py" --vulkan "$VULKAN4XENON" --out "$OUT/memory-tests"
 python3 "$ROOT/tools/xsdk/prepare_sources.py" --root "$ROOT" --out "$ROOT/build-xsdk/gen"
 make -C "$XSDK" -j"$JOBS" TOOLCHAIN="$XSDK_TOOLCHAIN/bin/powerpc-xsdk-elf-" build/libxsdk.a build/host/libxsc.so
 make -C "$VULKAN4XENON" -j"$JOBS" XSDK="$XSDK" TOOLCHAIN="$XSDK_TOOLCHAIN/bin/powerpc-xsdk-elf-" build/libvulkan4xenon.a
 cd "$OUT"
 export XSDK_GLSLANG
+python3 "$ROOT/tools/xsdk/prepare_shaders.py" --out "$OUT/shader-source"
 python3 "$VULKAN4XENON/tools/build_shaders.py" --xost "$XSDK/xenos-toolchain" \
-  --glslang "$ROOT/tools/xsdk/glslang.sh" --optimize --output ctr_shaders "$ROOT"/platform/xsdk/shaders/*
+  --glslang "$ROOT/tools/xsdk/glslang.sh" --optimize --output ctr_shaders "$OUT"/shader-source/*
 CC="$XSDK_TOOLCHAIN/bin/powerpc-xsdk-elf-gcc"
 GEN="$ROOT/build-xsdk/gen"
 FLAGS=(-mcpu=cell -fno-pic -std=gnu17 -O2 -g -fno-strict-aliasing -fwrapv -mcheck-fpr-alignment -ffunction-sections -fdata-sections

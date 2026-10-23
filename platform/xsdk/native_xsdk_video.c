@@ -50,7 +50,10 @@ static struct {
 int g_windowWidth=1280,g_windowHeight=720;
 static int xvEdgeAA=1;
 static void XvColorCheck(void);
-static struct { unsigned submits,uploads,reads,draws,passes; unsigned submitMS,waitMS; } xvCost;
+static struct {
+    unsigned submits,uploads,reads,draws,passes,shaderDraws[7],quads[4];
+    unsigned submitMS,waitMS,presentWaitMS,acquireMS,presentMS;
+} xvCost;
 int g_dbg_wireframeMode=0,g_dbg_texturelessMode=0,g_cfg_bilinearFiltering=1;
 static void XvCheck(VkResult result,const char *operation)
 {
@@ -187,9 +190,9 @@ static VkPipeline XvPipeline(unsigned pass,int shader,BlendMode blend,int stenci
     VkPipelineViewportStateCreateInfo viewport={.sType=VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,.viewportCount=1,.scissorCount=1};
     VkPipelineRasterizationStateCreateInfo raster={.sType=VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,.polygonMode=VK_POLYGON_MODE_FILL,.cullMode=VK_CULL_MODE_NONE,.frontFace=VK_FRONT_FACE_COUNTER_CLOCKWISE,.lineWidth=1};
     VkPipelineMultisampleStateCreateInfo samples={.sType=VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,.rasterizationSamples=VK_SAMPLE_COUNT_1_BIT};
-    VkStencilOpState st={.failOp=VK_STENCIL_OP_KEEP,.passOp=stencil==1?VK_STENCIL_OP_REPLACE:VK_STENCIL_OP_KEEP,
-        .depthFailOp=VK_STENCIL_OP_KEEP,.compareOp=stencil==1?VK_COMPARE_OP_ALWAYS:VK_COMPARE_OP_NOT_EQUAL,
-        .compareMask=255,.writeMask=255,.reference=1};
+    VkStencilOpState st={.failOp=VK_STENCIL_OP_REPLACE,.passOp=stencil==1?VK_STENCIL_OP_REPLACE:VK_STENCIL_OP_KEEP,
+        .depthFailOp=stencil==1?VK_STENCIL_OP_REPLACE:VK_STENCIL_OP_KEEP,.compareOp=stencil==1?VK_COMPARE_OP_ALWAYS:VK_COMPARE_OP_NOT_EQUAL,
+        .compareMask=stencil==1?0x10:255,.writeMask=255,.reference=1};
     VkPipelineDepthStencilStateCreateInfo ds={.sType=VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,.stencilTestEnable=stencil!=0,.front=st,.back=st};
     VkPipelineColorBlendAttachmentState attach={.colorWriteMask=15,.blendEnable=blend!=BM_NONE,
         .srcColorBlendFactor=VK_BLEND_FACTOR_ONE,.dstColorBlendFactor=VK_BLEND_FACTOR_ONE,.colorBlendOp=VK_BLEND_OP_ADD,
@@ -230,6 +233,7 @@ static void XvQuad(XvTarget *to,XvTarget *from,int mode,int x,int y,int width,in
     XvBindUniform(&state,texture);vkCmdBindPipeline(xv.command,VK_PIPELINE_BIND_POINT_GRAPHICS,XvPipeline(to->pass,7+mode,BM_NONE,0));
     VkDeviceSize quadOffset=XV_VERTEX_BYTES;vkCmdBindVertexBuffers(xv.command,0,1,&xv.vertices.buffer,&quadOffset);
     vkCmdDraw(xv.command,4,1,0,0);
+    xvCost.quads[mode]++;
 }
 static void XvSyncCPU(void)
 {
@@ -423,7 +427,7 @@ void NativeRenderer_UpdateVertexBuffer(const GrVertex *vertices,int count)
     XvVertex *out=(XvVertex *)(xv.vertices.map+xv.vertexCursor);xv.vertexCursor+=bytes;
     memcpy(out,vertices,bytes);
 }
-void NativeRenderer_DrawTriangles(int first,int triangles)
+static void XvDrawTriangles(int first,int triangles,int filtering)
 {
     if(first<0 || triangles<=0 || (unsigned)first>xv.vertexCount || (unsigned)triangles>(xv.vertexCount-first)/3)return;
     NativeRenderer_UpdateVRAM();XvLayout(&xv.vram,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -435,12 +439,17 @@ void NativeRenderer_DrawTriangles(int first,int triangles)
     vkCmdSetViewport(xv.command,0,1,&viewport);vkCmdSetScissor(xv.command,0,1,&clip);
     xv.state.scale[0]=xv.ui && !xv.offscreen?0.75f:1.0f;xv.state.scale[1]=xv.state.rect[2]*0.5f;
     xv.state.scale[2]=xv.offscreen?1.0f:0.0f;xv.state.scale[3]=(float)xv.format;
-    xv.state.flags[3]=g_cfg_bilinearFiltering && !xv.ui && !xv.offscreen;
+    xv.state.flags[3]=filtering;
     if(g_dbg_texturelessMode)xv.state.scale[3]=3;
     XvBindUniform(&xv.state,0);
-    vkCmdBindPipeline(xv.command,VK_PIPELINE_BIND_POINT_GRAPHICS,XvPipeline(0,(xv.format==TF_32_BIT_RGBA || g_dbg_texturelessMode)?6:2*(unsigned)xv.format+(xv.state.flags[3]>0.5f),xv.blend,xv.drawPrim?1:2));
+    unsigned shader=(xv.format==TF_32_BIT_RGBA || g_dbg_texturelessMode)?6:2*(unsigned)xv.format+(xv.state.flags[3]>0.5f);
+    vkCmdBindPipeline(xv.command,VK_PIPELINE_BIND_POINT_GRAPHICS,XvPipeline(0,shader,xv.blend,xv.drawPrim?1:2));
     VkDeviceSize offset=xv.vertexBase;vkCmdBindVertexBuffers(xv.command,0,1,&xv.vertices.buffer,&offset);
-    xvCost.draws++;vkCmdDraw(xv.command,triangles*3,1,first,0);if(!xv.offscreen)xv.mainValid=1;
+    xvCost.draws++;xvCost.shaderDraws[shader]++;vkCmdDraw(xv.command,triangles*3,1,first,0);if(!xv.offscreen)xv.mainValid=1;
+}
+void NativeRenderer_DrawTriangles(int first,int triangles)
+{
+    XvDrawTriangles(first,triangles,g_cfg_bilinearFiltering && !xv.ui && !xv.offscreen);
 }
 
 static int XvValidRect(int x,int y,int w,int h) { return x>=0 && y>=0 && w>0 && h>0 && x<=1024-w && y<=512-h; }
@@ -548,18 +557,26 @@ void NativeRenderer_StoreFrameBuffer(int x,int y,int w,int h)
 void NativeRenderer_PresentVRAMRect(int x,int y,int w,int h)
 {
     if(w<=0 || h<=0)return;NativeRenderer_UpdateVRAM();XvSubmit();
+    unsigned started=GetTickCount();
     unsigned index=0;XV_CALL(vkAcquireNextImageKHR(xv.device,xv.swapchain,UINT64_MAX,VK_NULL_HANDLE,xv.fence,&index));
     XV_CALL(vkWaitForFences(xv.device,1,&xv.fence,VK_TRUE,UINT64_MAX));XV_CALL(vkResetFences(xv.device,1,&xv.fence));
+    xvCost.acquireMS+=GetTickCount()-started;
     if(xv.mainResolved)XvQuad(&xv.swap[index],&xv.main,xvEdgeAA?3:0,0,0,XV_WIDTH,XV_HEIGHT,0,0,1,1);
     else XvQuad(&xv.swap[index],&xv.vram,2,0,0,XV_WIDTH,XV_HEIGHT,x/1024.0f,y/512.0f,w/1024.0f,h/512.0f);
-    XvLayout(&xv.swap[index],VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);XvSubmit();
+    XvLayout(&xv.swap[index],VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+    unsigned waitBefore=xvCost.waitMS;XvSubmit();xvCost.presentWaitMS+=xvCost.waitMS-waitBefore;
     VkPresentInfoKHR present={.sType=VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,.swapchainCount=1,.pSwapchains=&xv.swapchain,.pImageIndices=&index};
-    XV_CALL(vkQueuePresentKHR(xv.queue,&present));
+    started=GetTickCount();XV_CALL(vkQueuePresentKHR(xv.queue,&present));xvCost.presentMS+=GetTickCount()-started;
     static unsigned lastReport=0,frames=0;frames++;
     unsigned now=GetTickCount();
     if(now-lastReport>=5000){
         Platform_Log("[vulkan-perf] frames=%u span=%ums draws=%u passes=%u submits=%u submit=%ums wait=%ums uploads=%u reads=%u\n",
             frames,now-lastReport,xvCost.draws,xvCost.passes,xvCost.submits,xvCost.submitMS,xvCost.waitMS,xvCost.uploads,xvCost.reads);
+        Platform_Log("[vulkan-perf-detail] render-wait=%ums present-wait=%ums acquire=%ums flip=%ums shaders=%u,%u,%u,%u,%u,%u,%u quads=%u,%u,%u,%u\n",
+            xvCost.waitMS-xvCost.presentWaitMS,xvCost.presentWaitMS,xvCost.acquireMS,xvCost.presentMS,
+            xvCost.shaderDraws[0],xvCost.shaderDraws[1],xvCost.shaderDraws[2],xvCost.shaderDraws[3],
+            xvCost.shaderDraws[4],xvCost.shaderDraws[5],xvCost.shaderDraws[6],
+            xvCost.quads[0],xvCost.quads[1],xvCost.quads[2],xvCost.quads[3]);
         frames=0;lastReport=now;memset(&xvCost,0,sizeof(xvCost));
     }
 }
@@ -593,13 +610,18 @@ static void XvColorCheck(void)
     }
     xv.offscreen=1;xv.offRect=(RECT16){0,0,32,32};xv.drawPrim=1;
     xv.state.rect[2]=xv.state.rect[3]=32;
-    for(unsigned format=0;format<3;format++){
+    // Start with direct color, then repeat every format with both shaders.
+    // A failed first draw must not be misidentified as a 4-bit-only failure.
+    const unsigned formats[]={2,0,1,0,1,2,0,1,2};
+    for(unsigned check=0;check<sizeof(formats)/sizeof(formats[0]);check++){
+        unsigned format=formats[check],filtering=check>=6;
         memset(xv.pixels,0,sizeof(xv.pixels));
         for(unsigned i=0;i<4;i++)xv.pixels[128*1024+i]=colors[i];
         for(unsigned y=0;y<32;y++)for(unsigned x=0;x<32;x++)
             xv.pixels[y*1024+x]=format==0?0x3210:format==1?((x&1)?0x0302:0x0100):colors[x&3];
         xv.vramCPUChanged=1;xv.format=(TexFormat)format;
-        NativeRenderer_UpdateVertexBuffer(vertices,6);NativeRenderer_DrawTriangles(0,2);
+        xv.off.clearStencil=1;
+        NativeRenderer_UpdateVertexBuffer(vertices,6);XvDrawTriangles(0,2,filtering);
         XvLayout(&xv.off,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
         VkBufferImageCopy copy={.imageSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1},.imageExtent={1024,512,1}};
         vkCmdCopyImageToBuffer(xv.command,xv.off.image,xv.off.layout,xv.staging.buffer,1,&copy);XvSubmit();
@@ -607,12 +629,15 @@ static void XvColorCheck(void)
         XV_CALL(vkInvalidateMappedMemoryRanges(xv.device,1,&range));
         unsigned bad=0;
         for(unsigned y=1;y<31;y++)for(unsigned x=1;x<31;x++){
-            unsigned color=colors[x&3];unsigned char *pixel=xv.staging.map+4*(y*1024+x);
+            unsigned color=colors[x&3],next=colors[(x+1)&3];unsigned char *pixel=xv.staging.map+4*(y*1024+x);
             unsigned expected[3]={(color&31)*255/31,((color>>5)&31)*255/31,((color>>10)&31)*255/31};
+            if(filtering)for(unsigned channel=0;channel<3;channel++)
+                expected[channel]=(expected[channel]+((next>>(5*channel))&31)*255/31+1)/2;
             if(abs((int)pixel[0]-(int)expected[0])>1 || abs((int)pixel[1]-(int)expected[1])>1 || abs((int)pixel[2]-(int)expected[2])>1)bad++;
         }
         unsigned char *sample=xv.staging.map+4*(4*1024+4);
-        Platform_Log("[vulkan-check] format=%u wrong=%u/900 red-sample=%u,%u,%u expected=255,0,0\n",format,bad,sample[0],sample[1],sample[2]);
+        Platform_Log("[vulkan-check] check=%u format=%u filter=%u wrong=%u/900 sample=%u,%u,%u expected=%s\n",
+            check,format,filtering,bad,sample[0],sample[1],sample[2],filtering?"128,128,0":"255,0,0");
     }
     memset(xv.pixels,0,sizeof(xv.pixels));xv.vramCPUChanged=1;xv.vramGPUChanged=0;
     xv.offscreen=0;xv.drawPrim=0;xv.format=TF_4_BIT;xv.vertexCursor=0;xv.vertexCount=0;

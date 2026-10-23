@@ -6,8 +6,11 @@ layout(location=1) in vec4 rgba;
 layout(location=2) in vec2 dc;
 layout(location=3) in vec4 page;
 layout(location=0) out vec4 result;
+vec2 bytes(vec2 pos) {
+    return floor(texture(vram,(mod(floor(pos),vec2(1024,512))+0.5)/vec2(1024,512)).rg*255.0+0.5);
+}
 float word(vec2 pos) {
-    vec2 rg=floor(texture(vram,(mod(floor(pos),vec2(1024,512))+0.5)/vec2(1024,512)).rg*255.0+0.5);
+    vec2 rg=bytes(pos);
     return rg.x+rg.y*256.0;
 }
 vec4 unpackColor(float w) {
@@ -18,17 +21,19 @@ float textureWord(vec2 uv) {
     float w;
     #if XV_FORMAT == 0
     {
-        w=word(floor(page.xy+0.5)+vec2(floor(uv.x/4.0),uv.y));
+        vec2 rg=bytes(floor(page.xy+0.5)+vec2(floor(uv.x*0.25),uv.y));
         float component=mod(uv.x,4.0);
-        float inverse=mix(1.0,1.0/16.0,step(1.0,component));
-        inverse=mix(inverse,1.0/256.0,step(2.0,component));
-        inverse=mix(inverse,1.0/4096.0,step(3.0,component));
-        w=word(floor(page.zw+0.5)+vec2(mod(floor(w*inverse),16.0),0));
+        // Select the byte, then its nibble, as in the working XDK renderer.
+        // Arithmetic stays in 0..255; no variable full-word shift multiplier.
+        float b=mix(rg.x,rg.y,step(2.0,component));
+        float high=floor(b*0.0625);
+        float index=mix(b-high*16.0,high,mod(component,2.0));
+        w=word(floor(page.zw+0.5)+vec2(index,0));
     }
 #elif XV_FORMAT == 1
     {
-        w=word(floor(page.xy+0.5)+vec2(floor(uv.x/2.0),uv.y));
-        w=word(floor(page.zw+0.5)+vec2(mod(floor(w*mix(1.0,1.0/256.0,step(1.0,mod(uv.x,2.0)))),256.0),0));
+        vec2 rg=bytes(floor(page.xy+0.5)+vec2(floor(uv.x*0.5),uv.y));
+        w=word(floor(page.zw+0.5)+vec2(mix(rg.x,rg.y,mod(uv.x,2.0)),0));
     }
 #else
     w=word(floor(page.xy+0.5)+uv);
@@ -53,7 +58,9 @@ void main() {
 #elif XV_FILTER
     {
         vec2 uv=tc.xy; vec2 f=fract(uv);vec2 p=floor(uv);
-        c=mix(mix(samplePSX(p),samplePSX(p+vec2(1,0)),f.x),
+        // textureWord floors UV: the nearest sample is exactly the top-left
+        // filtering tap. Its visibility/STP decision above still applies.
+        c=mix(mix(vec4(unpackColor(nearest).rgb,1),samplePSX(p+vec2(1,0)),f.x),
               mix(samplePSX(p+vec2(0,1)),samplePSX(p+vec2(1,1)),f.x),f.y);
         c.rgb/=max(c.a,0.0001);
 

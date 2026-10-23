@@ -13,6 +13,12 @@
 # Local matching experiments and caches.
 /.cache/
 
+# Private development checkpoints and research.
+/research/
+/*.md
+!/README.md
+!/THIRD_PARTY_NOTICES.md
+
 # Runtime state.
 /memcards/
 *.log

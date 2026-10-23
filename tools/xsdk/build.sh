@@ -14,6 +14,7 @@ python3 "$ROOT/tools/xsdk/verify_deps.py" "$XSDK" "$VULKAN4XENON"
 python3 "$ROOT/tools/xsdk/test_vertex_fetch.py" --xsdk "$XSDK" --vulkan "$VULKAN4XENON"
 python3 "$ROOT/tools/xsdk/test_render_targets.py" --vulkan "$VULKAN4XENON" --out "$OUT/target-tests"
 python3 "$ROOT/tools/xsdk/test_render_memory.py" --vulkan "$VULKAN4XENON" --out "$OUT/memory-tests"
+python3 "$ROOT/tools/xsdk/test_draw_routing.py" --vulkan "$VULKAN4XENON" --out "$OUT/routing-tests"
 python3 "$ROOT/tools/xsdk/test_log_buffer.py" --out "$OUT/log-tests"
 python3 "$ROOT/tools/xsdk/prepare_sources.py" --root "$ROOT" --out "$ROOT/build-xsdk/gen"
 make -C "$XSDK" -j"$JOBS" TOOLCHAIN="$XSDK_TOOLCHAIN/bin/powerpc-xsdk-elf-" build/libxsdk.a build/host/libxsc.so

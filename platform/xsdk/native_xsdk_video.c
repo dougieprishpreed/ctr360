@@ -442,7 +442,9 @@ static void XvDrawTriangles(int first,int triangles,int filtering)
     xv.state.flags[3]=filtering;
     if(g_dbg_texturelessMode)xv.state.scale[3]=3;
     XvBindUniform(&xv.state,0);
-    unsigned shader=(xv.format==TF_32_BIT_RGBA || g_dbg_texturelessMode)?6:2*(unsigned)xv.format+(xv.state.flags[3]>0.5f);
+    /* Untextured splits retain the draw environment's tpage format. Their
+     * white texture ID, not that inherited format, selects vertex color. */
+    unsigned shader=(xv.texture==NativeRenderer_GetWhiteTexture() || xv.format==TF_32_BIT_RGBA || g_dbg_texturelessMode)?6:2*(unsigned)xv.format+(xv.state.flags[3]>0.5f);
     vkCmdBindPipeline(xv.command,VK_PIPELINE_BIND_POINT_GRAPHICS,XvPipeline(0,shader,xv.blend,xv.drawPrim?1:2));
     VkDeviceSize offset=xv.vertexBase;vkCmdBindVertexBuffers(xv.command,0,1,&xv.vertices.buffer,&offset);
     xvCost.draws++;xvCost.shaderDraws[shader]++;vkCmdDraw(xv.command,triangles*3,1,first,0);if(!xv.offscreen)xv.mainValid=1;
@@ -612,14 +614,21 @@ static void XvColorCheck(void)
     xv.state.rect[2]=xv.state.rect[3]=32;
     // Start with direct color, then repeat every format with both shaders.
     // A failed first draw must not be misidentified as a 4-bit-only failure.
-    const unsigned formats[]={2,0,1,0,1,2,0,1,2};
+    const unsigned formats[]={2,0,1,0,1,2,0,1,2,0,1,2,0};
     for(unsigned check=0;check<sizeof(formats)/sizeof(formats[0]);check++){
-        unsigned format=formats[check],filtering=check>=6;
+        unsigned format=formats[check],filtering=check>=6,flat=check>=9;
         memset(xv.pixels,0,sizeof(xv.pixels));
         for(unsigned i=0;i<4;i++)xv.pixels[128*1024+i]=colors[i];
         for(unsigned y=0;y<32;y++)for(unsigned x=0;x<32;x++)
             xv.pixels[y*1024+x]=format==0?0x3210:format==1?((x&1)?0x0302:0x0100):colors[x&3];
-        xv.vramCPUChanged=1;xv.format=(TexFormat)format;
+        /* Exercise the public texture contract as game splits do. Flat
+         * polygons must ignore both a stale tpage and non-white VRAM. */
+        NativeRenderer_SetTexture(flat && check!=12?NativeRenderer_GetWhiteTexture():NativeRenderer_GetVRAMTexture(),(TexFormat)format);
+        g_dbg_texturelessMode=check==12;
+        for(unsigned i=0;i<6;i++){
+            vertices[i].r=flat?64:255;vertices[i].g=flat?128:255;vertices[i].b=flat?192:255;
+        }
+        xv.vramCPUChanged=1;
         xv.off.clearStencil=1;
         NativeRenderer_UpdateVertexBuffer(vertices,6);XvDrawTriangles(0,2,filtering);
         XvLayout(&xv.off,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
@@ -631,16 +640,19 @@ static void XvColorCheck(void)
         for(unsigned y=1;y<31;y++)for(unsigned x=1;x<31;x++){
             unsigned color=colors[x&3],next=colors[(x+1)&3];unsigned char *pixel=xv.staging.map+4*(y*1024+x);
             unsigned expected[3]={(color&31)*255/31,((color>>5)&31)*255/31,((color>>10)&31)*255/31};
-            if(filtering)for(unsigned channel=0;channel<3;channel++)
+            if(flat){expected[0]=64;expected[1]=128;expected[2]=192;}
+            else if(filtering)for(unsigned channel=0;channel<3;channel++)
                 expected[channel]=(expected[channel]+((next>>(5*channel))&31)*255/31+1)/2;
             if(abs((int)pixel[0]-(int)expected[0])>1 || abs((int)pixel[1]-(int)expected[1])>1 || abs((int)pixel[2]-(int)expected[2])>1)bad++;
         }
         unsigned char *sample=xv.staging.map+4*(4*1024+4);
-        Platform_Log("[vulkan-check] check=%u format=%u filter=%u wrong=%u/900 sample=%u,%u,%u expected=%s\n",
-            check,format,filtering,bad,sample[0],sample[1],sample[2],filtering?"128,128,0":"255,0,0");
+        Platform_Log("[vulkan-check] check=%u format=%u filter=%u wrong=%u/900 sample=%u,%u,%u expected=%s kind=%s\n",
+            check,format,filtering,bad,sample[0],sample[1],sample[2],flat?"64,128,192":filtering?"128,128,0":"255,0,0",
+            check==12?"debug-flat":flat?"flat":"textured");
     }
+    g_dbg_texturelessMode=0;
     memset(xv.pixels,0,sizeof(xv.pixels));xv.vramCPUChanged=1;xv.vramGPUChanged=0;
-    xv.offscreen=0;xv.drawPrim=0;xv.format=TF_4_BIT;xv.vertexCursor=0;xv.vertexCount=0;
+    xv.offscreen=0;xv.drawPrim=0;xv.texture=NativeRenderer_GetVRAMTexture();xv.format=TF_4_BIT;xv.vertexCursor=0;xv.vertexCount=0;
     memset(&xv.state,0,sizeof(xv.state));xv.state.rect[2]=512;xv.state.rect[3]=216;xv.state.scale[0]=1;
     NativeRenderer_UpdateVRAM();XvSubmit();memset(&xvCost,0,sizeof(xvCost));
 }

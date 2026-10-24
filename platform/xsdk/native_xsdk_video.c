@@ -236,15 +236,23 @@ static void XvQuad(XvTarget *to,XvTarget *from,int mode,int x,int y,int width,in
     vkCmdDraw(xv.command,4,1,0,0);
     xvCost.quads[mode]++;
 }
+static void XvReadTarget(XvTarget *target)
+{
+    /* vulkan4xenon accepts whole-level image/buffer copies. The 720p main
+     * target is larger than PSX VRAM, including its tightly packed row pitch. */
+    XV_CALL((size_t)target->width*target->height*4<=xv.staging.size?VK_SUCCESS:VK_ERROR_OUT_OF_HOST_MEMORY);
+    XvLayout(target,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    VkBufferImageCopy region={.imageSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1},
+        .imageExtent={target->width,target->height,1}};
+    vkCmdCopyImageToBuffer(xv.command,target->image,target->layout,xv.staging.buffer,1,&region);XvSubmit();
+    VkMappedMemoryRange range={.sType=VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,.memory=xv.staging.memory,.size=VK_WHOLE_SIZE};
+    XV_CALL(vkInvalidateMappedMemoryRanges(xv.device,1,&range));
+}
 static void XvSyncCPU(void)
 {
     if(!xv.vramGPUChanged)return;
     xvCost.reads++;
-    XvLayout(&xv.vram,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-    VkBufferImageCopy region={.imageSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1},.imageExtent={1024,512,1}};
-    vkCmdCopyImageToBuffer(xv.command,xv.vram.image,xv.vram.layout,xv.staging.buffer,1,&region);XvSubmit();
-    VkMappedMemoryRange range={.sType=VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,.memory=xv.staging.memory,.size=VK_WHOLE_SIZE};
-    XV_CALL(vkInvalidateMappedMemoryRanges(xv.device,1,&range));
+    XvReadTarget(&xv.vram);
     for(unsigned i=0;i<1024*512;i++)xv.pixels[i]=(u16)(xv.staging.map[4*i]|xv.staging.map[4*i+1]<<8);
     xv.vramGPUChanged=0;
 }
@@ -337,7 +345,7 @@ int NativeRenderer_InitialiseRender(char *name,int width,int height,int fullscre
     XvQuadVertex *quad=(XvQuadVertex *)(xv.vertices.map+XV_VERTEX_BYTES);
     memset(quad,0,4*sizeof(*quad));quad[1].position[1]=1;quad[2].position[0]=1;quad[3].position[0]=1;quad[3].position[1]=1;
     XvBufferCreate(&xv.uniforms,XV_UNIFORM_BYTES,VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
-    XvBufferCreate(&xv.staging,1024*512*4,VK_BUFFER_USAGE_TRANSFER_SRC_BIT|VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+    XvBufferCreate(&xv.staging,XV_WIDTH*XV_HEIGHT*4,VK_BUFFER_USAGE_TRANSFER_SRC_BIT|VK_BUFFER_USAGE_TRANSFER_DST_BIT);
     VkDescriptorSetLayoutBinding bindings[]={
         {.binding=0,.descriptorType=VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,.descriptorCount=1,.stageFlags=VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT},
         {.binding=1,.descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,.descriptorCount=1,.stageFlags=VK_SHADER_STAGE_FRAGMENT_BIT}};
@@ -666,14 +674,10 @@ static void XvColorCheck(void)
         }
         NativeRenderer_UpdateVertexBuffer(vertices,6);XvDrawTriangles(0,2,filtering);
         XvTarget *checked=xv.offscreen?&xv.off:&xv.main;
-        XvLayout(checked,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-        VkBufferImageCopy copy={.imageSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1},.imageExtent={1024,512,1}};
-        vkCmdCopyImageToBuffer(xv.command,checked->image,checked->layout,xv.staging.buffer,1,&copy);XvSubmit();
-        VkMappedMemoryRange range={.sType=VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,.memory=xv.staging.memory,.size=VK_WHOLE_SIZE};
-        XV_CALL(vkInvalidateMappedMemoryRanges(xv.device,1,&range));
+        XvReadTarget(checked);
         unsigned bad=0;
         for(unsigned y=1;y<31;y++)for(unsigned x=1;x<31;x++){
-            unsigned color=colors[x&3],next=colors[(x+1)&3];unsigned char *pixel=xv.staging.map+4*(y*1024+x);
+            unsigned color=colors[x&3],next=colors[(x+1)&3];unsigned char *pixel=xv.staging.map+4*(y*checked->width+x);
             unsigned expected[3]={(color&31)*255/31,((color>>5)&31)*255/31,((color>>10)&31)*255/31};
             if(blending)memcpy(expected,blendExpected[check-19],sizeof(expected));
             else if(modulation){expected[0]=247;expected[1]=93;expected[2]=31;}
@@ -682,7 +686,7 @@ static void XvColorCheck(void)
                 expected[channel]=(expected[channel]+((next>>(5*channel))&31)*255/31+1)/2;
             if(abs((int)pixel[0]-(int)expected[0])>1 || abs((int)pixel[1]-(int)expected[1])>1 || abs((int)pixel[2]-(int)expected[2])>1)bad++;
         }
-        unsigned char *sample=xv.staging.map+4*(4*1024+4);
+        unsigned char *sample=xv.staging.map+4*(4*checked->width+4);
         const unsigned *expectedSample=blending?blendExpected[check-19]:modulation?(const unsigned[]){247,93,31}:flat?(const unsigned[]){64,128,192}:filtering?(const unsigned[]){128,128,0}:(const unsigned[]){255,0,0};
         Platform_Log("[vulkan-check] check=%u format=%u filter=%u wrong=%u/900 sample=%u,%u,%u expected=%u,%u,%u kind=%s blend=%u\n",
             check,format,filtering,bad,sample[0],sample[1],sample[2],expectedSample[0],expectedSample[1],expectedSample[2],

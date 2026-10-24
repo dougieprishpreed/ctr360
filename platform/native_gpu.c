@@ -883,7 +883,15 @@ internal void NativeGpu_PrepareFramebufferFeedback(int tpage)
 		DrawAllSplits();
 	}
 
+#ifdef CTR_XSDK
+	/* Count feedback separately from the final presentation copy. */
+	{
+		extern void NativeRenderer_StoreFeedback(int x, int y, int w, int h);
+		NativeRenderer_StoreFeedback(activeDrawEnv.clip.x, activeDrawEnv.clip.y, activeDrawEnv.clip.w, activeDrawEnv.clip.h);
+	}
+#else
 	NativeRenderer_StoreFrameBuffer(activeDrawEnv.clip.x, activeDrawEnv.clip.y, activeDrawEnv.clip.w, activeDrawEnv.clip.h);
+#endif
 	s_gpu.framebufferFeedbackRunActive = true;
 }
 

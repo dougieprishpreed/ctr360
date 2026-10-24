@@ -38,7 +38,7 @@ static struct {
  RECT16 offRect; VkRect2D scissor; XvUniform state;
  TextureID texture; TexFormat format; BlendMode blend;
 } xv;
-static struct {unsigned draws,shaderDraws[7];} xvCost;
+static struct {unsigned draws,shaderDraws[7],blendDraws[5],uiDraws;} xvCost;
 static int g_dbg_texturelessMode,g_cfg_bilinearFiltering=1;
 static unsigned selected,stencil,bound,draws,firstSeen,countSeen;
 static XvTarget *targetSeen;
@@ -59,7 +59,7 @@ void vkCmdDraw(VkCommandBuffer c,uint32_t n,uint32_t i,uint32_t f,uint32_t fi){d
 static void check(TextureID texture,TexFormat format,int filtering,int expected){
  NativeRenderer_SetTexture(texture,format);
  XvDrawTriangles(3,2,filtering);
- assert(selected==expected && bound==expected);
+ assert(selected==expected+(xv.offscreen?7:0) && bound==selected);
  assert(firstSeen==3 && countSeen==6 && stencil==(xv.drawPrim?1:2));
  assert(targetSeen==(xv.offscreen?&xv.off:&xv.main));
 }
@@ -81,7 +81,7 @@ int main(void){
  NativeRenderer_SetTexture(NativeRenderer_GetVRAMTexture(),TF_4_BIT);
  NativeRenderer_DrawTriangles(3,2);assert(selected==1);
  xv.ui=1;NativeRenderer_DrawTriangles(3,2);assert(selected==0);
- xv.ui=0;xv.offscreen=1;NativeRenderer_DrawTriangles(3,2);assert(selected==0);
+ xv.ui=0;xv.offscreen=1;NativeRenderer_DrawTriangles(3,2);assert(selected==7);
  unsigned before=draws;
  XvDrawTriangles(-1,2,1);XvDrawTriangles(0,0,1);XvDrawTriangles(10,2,1);XvDrawTriangles(13,1,1);
  assert(draws==before);

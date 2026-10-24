@@ -11,10 +11,11 @@ def prepare(out):
     out.mkdir(parents=True, exist_ok=True)
     for name in ('psx.vert', 'quad.vert'):
         (out / name).write_text((source / name).read_text(), newline='\n')
-    for index in range(7):
+    for index in range(14):
+        kind = index % 7
         text = (source / 'psx.frag').read_text()
-        text = text.replace('#version 450', '#version 450\n#define XV_FORMAT %d\n#define XV_FILTER %d' %
-                            (index // 2 if index < 6 else 3, index % 2 if index < 6 else 0), 1)
+        text = text.replace('#version 450', '#version 450\n#define XV_FORMAT %d\n#define XV_FILTER %d\n#define XV_DITHER %d' %
+                            (kind // 2 if kind < 6 else 3, kind % 2 if kind < 6 else 0, index >= 7), 1)
         (out / ('psx_%d.frag' % index)).write_text(text, newline='\n')
     for mode in range(4):
         text = (source / 'quad.frag').read_text()

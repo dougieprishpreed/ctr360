@@ -1,10 +1,9 @@
 #version 450
 layout(set=0,binding=0,std140) uniform State { vec4 rect; vec4 scale; vec4 flags; vec4 source; } s;
 layout(set=0,binding=1) uniform sampler2D vram;
-layout(location=0) in vec4 tc;
-layout(location=1) in vec4 rgba;
-layout(location=2) in vec2 dc;
-layout(location=3) in vec4 page;
+layout(location=0) in vec4 rgba;
+layout(location=1) in vec4 tc;
+layout(location=2) in vec4 page;
 layout(location=0) out vec4 result;
 vec2 bytes(vec2 pos) {
     return floor(texture(vram,(mod(floor(pos),vec2(1024,512))+0.5)/vec2(1024,512)).rg*255.0+0.5);
@@ -68,12 +67,17 @@ void main() {
 #else
     c=vec4(unpackColor(nearest).rgb,1);
 #endif
+    #if XV_DITHER
+    vec2 dc=vec2(tc.z,rgba.a);
     vec2 d=mod(floor(dc),4.0);
     vec4 row=mix(vec4(-4,0,-3,1),vec4(2,-2,3,-1),step(1.0,d.x));
     row=mix(row,vec4(-3,1,-4,0),step(2.0,d.x));
     row=mix(row,vec4(3,-1,2,-2),step(3.0,d.x));
     float noise=mix(mix(row.x,row.y,step(1.0,d.y)),mix(row.z,row.w,step(3.0,d.y)),step(2.0,d.y));
     c.rgb=clamp(c.rgb*rgba.rgb+noise*tc.w/255.0,0.0,1.0);
+    #else
+    c.rgb=clamp(c.rgb*rgba.rgb,0.0,1.0);
+    #endif
     #if XV_FORMAT == 3
     if(c.a>=0.0001) { result=vec4(c.rgb,s.flags.y>0.5?1.0:0.0); }
 #else

@@ -15,6 +15,7 @@ python3 "$ROOT/tools/xsdk/test_vertex_fetch.py" --xsdk "$XSDK" --vulkan "$VULKAN
 python3 "$ROOT/tools/xsdk/test_render_targets.py" --vulkan "$VULKAN4XENON" --out "$OUT/target-tests"
 python3 "$ROOT/tools/xsdk/test_render_memory.py" --vulkan "$VULKAN4XENON" --out "$OUT/memory-tests"
 python3 "$ROOT/tools/xsdk/test_draw_routing.py" --vulkan "$VULKAN4XENON" --out "$OUT/routing-tests"
+python3 "$ROOT/tools/xsdk/test_present_submit.py" --vulkan "$VULKAN4XENON" --out "$OUT/present-tests"
 python3 "$ROOT/tools/xsdk/test_log_buffer.py" --out "$OUT/log-tests"
 python3 "$ROOT/tools/xsdk/prepare_sources.py" --root "$ROOT" --out "$ROOT/build-xsdk/gen"
 make -C "$XSDK" -j"$JOBS" TOOLCHAIN="$XSDK_TOOLCHAIN/bin/powerpc-xsdk-elf-" build/libxsdk.a build/host/libxsc.so
@@ -25,6 +26,9 @@ python3 "$ROOT/tools/xsdk/prepare_shaders.py" --out "$OUT/shader-source"
 python3 "$VULKAN4XENON/tools/build_shaders.py" --xost "$XSDK/xenos-toolchain" \
   --glslang "$ROOT/tools/xsdk/glslang.sh" --optimize --output ctr_shaders "$OUT"/shader-source/*
 python3 "$ROOT/tools/xsdk/test_shader_pixels.py" --xsdk "$XSDK" --bundle "$OUT/ctr_shaders.c"
+python3 "$ROOT/tools/xsdk/test_present_pixels.py" --xsdk "$XSDK" --bundle "$OUT/ctr_shaders.c"
+python3 "$ROOT/tools/xsdk/test_dither_work.py" --xsdk "$XSDK" --bundle "$OUT/ctr_shaders.c"
+python3 "$ROOT/tools/xsdk/test_vertex_shader.py" --xsdk "$XSDK" --bundle "$OUT/ctr_shaders.c"
 CC="$XSDK_TOOLCHAIN/bin/powerpc-xsdk-elf-gcc"
 GEN="$ROOT/build-xsdk/gen"
 FLAGS=(-mcpu=cell -fno-pic -std=gnu17 -O2 -g -fno-strict-aliasing -fwrapv -mcheck-fpr-alignment -ffunction-sections -fdata-sections

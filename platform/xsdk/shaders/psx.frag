@@ -78,10 +78,11 @@ void main() {
     #else
     c.rgb=clamp(c.rgb*rgba.rgb,0.0,1.0);
     #endif
+    // PSX coverage follows the nearest texel, tested above. A tiny filtered
+    // weight at a transparent edge must not punch an extra hole in geometry.
     #if XV_FORMAT == 3
-    if(c.a>=0.0001) { result=vec4(c.rgb,s.flags.y>0.5?1.0:0.0); }
+    result=vec4(c.rgb,s.flags.y>0.5?1.0:0.0);
 #else
-    if(c.a>=0.0001) { result=vec4(c.rgb,(s.flags.y>0.5 || (s.flags.z>0.5 && stp>0.5))?1.0:0.0); }
+    result=vec4(c.rgb,(s.flags.y>0.5 || (s.flags.z>0.5 && stp>0.5))?1.0:0.0);
 #endif
-    else { discard; }
 }

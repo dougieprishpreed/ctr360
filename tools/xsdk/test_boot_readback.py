@@ -17,6 +17,7 @@ def function(source,start):
   depth+=(source[end]=='{')-(source[end]=='}');end+=1
  return source[begin:end]+'\n'
 reader=function(s,'static void XvReadTarget(')
+clearer=function(s,'static void XvClearDiagnosticTarget(')
 checks=function(s,'static void XvColorCheck(void)\n{')
 allocate=re.search(r'XvBufferCreate\(&xv.staging,([^,]+),',s)[1]
 validator=function(upstream,'static uint32_t level_size(')+function(upstream,'static bool whole_level(')
@@ -49,7 +50,7 @@ static struct {
 } xv;
 static struct {unsigned unused;} xvCost;
 static int g_dbg_texturelessMode;
-static unsigned copies,mainCopies,offCopies,logs;
+static unsigned copies,mainCopies,offCopies,logs,clears;
 #define XV_CALL(x) do{if((x)!=VK_SUCCESS)exit(42);}while(0)
 static void XvLayout(XvTarget *t,VkImageLayout layout){t->layout=layout;}
 static void XvSubmit(void){}
@@ -61,6 +62,12 @@ static void NativeRenderer_UpdateVertexBuffer(const GrVertex *v,int n){assert(n=
 static void XvDrawTriangles(int first,int n,int filtering){assert(first==0 && n==2);}
 static void XvPass(XvTarget *t){}
 void vkCmdClearAttachments(VkCommandBuffer c,uint32_t n,const VkClearAttachment *a,uint32_t nr,const VkClearRect *r){}
+void vkCmdClearColorImage(VkCommandBuffer cb,VkImage image,VkImageLayout layout,const VkClearColorValue *color,uint32_t n,const VkImageSubresourceRange *range){
+ assert(copies==30 && layout==VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && n==1);
+ assert(image==(VkImage)(uintptr_t)(clears?&xv.off:&xv.main));
+ assert(range->aspectMask==VK_IMAGE_ASPECT_COLOR_BIT && range->baseMipLevel==0 && range->levelCount==1 && range->baseArrayLayer==0 && range->layerCount==1);
+ for(unsigned i=0;i<4;i++)assert(color->float32[i]==0);clears++;
+}
 VkResult vkInvalidateMappedMemoryRanges(VkDevice d,uint32_t n,const VkMappedMemoryRange *r){assert(n==1 && r->size==VK_WHOLE_SIZE);return VK_SUCCESS;}
 static void Platform_Log(const char *format,...){
  va_list ap;va_start(ap,format);unsigned check=va_arg(ap,unsigned);(void)va_arg(ap,unsigned);(void)va_arg(ap,unsigned);
@@ -88,12 +95,13 @@ void vkCmdCopyImageToBuffer(VkCommandBuffer cb,VkImage image,VkImageLayout layou
  }
  copies++;if(target==&xv.main)mainCopies++;else {assert(target==&xv.off);offCopies++;}
 }
-'''+reader+checks+r'''
+'''+reader+clearer+checks+r'''
 int main(void){
  xv.main.width=1280;xv.main.height=720;xv.off.width=1024;xv.off.height=512;
  xv.main.image=(VkImage)(uintptr_t)&xv.main;xv.off.image=(VkImage)(uintptr_t)&xv.off;
  xv.staging.size=ALLOCATION_BYTES;xv.staging.map=malloc(xv.staging.size);assert(xv.staging.map);
  XvColorCheck();assert(logs==30 && copies==30 && mainCopies==6 && offCopies==24);
+ assert(clears==2 && xv.main.clearStencil && xv.off.clearStencil);
  assert(xv.mainValid==0 && xv.mainResolved==0);free(xv.staging.map);
  puts("PASS: all 30 actual boot checks; upstream whole-level validator, main/VRAM staging capacity and per-target readback pitch");
 }
@@ -111,3 +119,6 @@ assert old_capacity!=c and run(old_capacity,'capacity-negative').returncode==42
 old_pitch=c.replace('y*checked->width','y*1024').replace('4*checked->width','4*1024')
 assert old_pitch!=c and run(old_pitch,'pitch-negative').returncode!=0
 print('PASS: prior partial-main copy, undersized staging and fixed-1024 read pitch rejected')
+dirty=c.replace('XvClearDiagnosticTarget(&xv.main);XvClearDiagnosticTarget(&xv.off);','')
+assert dirty!=c and run(dirty,'diagnostic-residue-negative').returncode!=0
+print('PASS: both diagnostic targets cleared before game; leaving test pixels rejected')

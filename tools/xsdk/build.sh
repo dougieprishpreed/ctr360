@@ -15,6 +15,7 @@ python3 "$ROOT/tools/xsdk/test_vertex_fetch.py" --xsdk "$XSDK" --vulkan "$VULKAN
 python3 "$ROOT/tools/xsdk/test_render_targets.py" --vulkan "$VULKAN4XENON" --out "$OUT/target-tests"
 python3 "$ROOT/tools/xsdk/test_render_memory.py" --vulkan "$VULKAN4XENON" --out "$OUT/memory-tests"
 python3 "$ROOT/tools/xsdk/test_boot_readback.py" --vulkan "$VULKAN4XENON" --out "$OUT/readback-tests"
+python3 "$ROOT/tools/xsdk/test_hud_glow.py" --out "$OUT/hud-tests"
 python3 "$ROOT/tools/xsdk/test_draw_routing.py" --vulkan "$VULKAN4XENON" --out "$OUT/routing-tests"
 python3 "$ROOT/tools/xsdk/test_present_submit.py" --vulkan "$VULKAN4XENON" --out "$OUT/present-tests"
 python3 "$ROOT/tools/xsdk/test_log_buffer.py" --out "$OUT/log-tests"

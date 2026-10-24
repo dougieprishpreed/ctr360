@@ -93,6 +93,19 @@ def main():
         count += 1
 
     for bank in (0,7):
+        # The nearest nonzero texel remains visible even when transparent
+        # neighbors make its filtered weight smaller than 0.0001.
+        for fmt in range(3):
+            vram[:] = [0] * len(vram)
+            vram[480*1024+17] = 31
+            vram[256*1024+64] = 31 if fmt == 2 else 1
+            for uv in ((0.99999,0.99999),(0.999,0.999),(0.99999,0.5)):
+                for flags in ((0,0,0,0),(1,1,0,0),(2,0,1,0)):
+                    check(fmt*2+1,uv,flags)
+            # Fully transparent nearest texels still discard.
+            check(fmt*2+1,(1.5,1.5))
+        vram[:] = [0] * len(vram)
+        vram[480*1024+16:480*1024+272] = palette
         # All possible byte values in every nibble/byte lane. Palettes include zero,
         # opaque colors, STP colors, and nonzero texture-page/CLUT coordinates.
         for fmt in range(3):

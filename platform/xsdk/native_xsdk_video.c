@@ -623,6 +623,15 @@ void NativeRenderer_SaveVRAM(const char *path,int x,int y,int w,int h,int frameb
         u16 color=xv.pixels[row*1024+col];unsigned char bgr[3]={(color>>10&31)*255/31,(color>>5&31)*255/31,(color&31)*255/31};fwrite(bgr,1,3,file);
     }fclose(file);
 }
+static void XvClearDiagnosticTarget(XvTarget *target)
+{
+    XvLayout(target,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    VkClearColorValue zero={{0,0,0,0}};
+    VkImageSubresourceRange range={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
+    vkCmdClearColorImage(xv.command,target->image,target->layout,&zero,1,&range);
+    target->clearStencil=1;
+}
+
 /* One boot-only check of actual GPU pixels, never inferred from frame counts.
  * Four known colors exercise packed uploads, palette lookups and vertex fetch.
  * Keep this off-screen; restore the CPU VRAM and renderer state afterwards. */
@@ -696,6 +705,9 @@ static void XvColorCheck(void)
     memset(xv.pixels,0,sizeof(xv.pixels));xv.vramCPUChanged=1;xv.vramGPUChanged=0;
     xv.offscreen=0;xv.drawPrim=0;xv.texture=NativeRenderer_GetVRAMTexture();xv.format=TF_4_BIT;xv.vertexCursor=0;xv.vertexCount=0;
     xv.mainValid=xv.mainResolved=0;
+    // Both passes LOAD their color attachment. Do not leave test patterns for
+    // the game's first partial screen update to expose during scene startup.
+    XvClearDiagnosticTarget(&xv.main);XvClearDiagnosticTarget(&xv.off);
     memset(&xv.state,0,sizeof(xv.state));xv.state.rect[2]=512;xv.state.rect[3]=216;xv.state.scale[0]=1;
     NativeRenderer_UpdateVRAM();XvSubmit();memset(&xvCost,0,sizeof(xvCost));
 }

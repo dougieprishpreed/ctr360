@@ -211,8 +211,8 @@ void UI_Weapon_DrawBG(s16 posX, s16 posY, s16 scale, struct Driver *d)
 		    // pointer to PrimMem struct
 		    &gGT->backBuffer->primMem,
 
-		    // pointer to OTMem
-		    gGT->pushBuffer[d->driverID].ptrOT,
+		    // Match the HUD icons' transform and interpolated-frame capture.
+		    gGT->pushBuffer_UI.ptrOT,
 
 		    UI_WEAPON_BG_SHINE_TRANSPARENCY_BASE + i, scaleInt, shineScale, UI_WEAPON_BG_SHINE_COLOR);
 	}

@@ -18,7 +18,7 @@ def function(source,start):
  return source[begin:end]+'\n'
 reader=function(s,'static void XvReadTarget(')
 clearer=function(s,'static void XvClearDiagnosticTarget(')
-sweep=function(s,'static unsigned XvSweepWord(')+function(s,'static void XvSweepExpected(')+function(s,'static void XvColorSweep(')
+sweep=function(s,'static unsigned XvSweepWord(')+function(s,'static void XvSweepExpected(')+function(s,'static void XvColorSweep(')+function(s,'static void XvMeshCheck(')
 checks=function(s,'static void XvColorCheck(void)\n{')
 allocate=re.search(r'XvBufferCreate\(&xv.staging,([^,]+),',s)[1]
 validator=function(upstream,'static uint32_t level_size(')+function(upstream,'static bool whole_level(')
@@ -33,7 +33,7 @@ c=r'''
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
-typedef uint16_t u16;
+typedef uint16_t u16;typedef int16_t s16;typedef uint8_t u8;
 typedef struct {int16_t x,y,page,clut;uint8_t u,v,bright,dither,r,g,b,a;int8_t tcx,tcy,pad0,pad1;} GrVertex;
 typedef struct {int x,y,w,h;} RECT16;
 typedef unsigned TexFormat;
@@ -47,13 +47,37 @@ typedef struct {unsigned first,count;} Slices;
 typedef struct {unsigned width,height;bool is_texture;struct {unsigned dimension,levels,depth;} texture;} Image;
 static struct {
  VkDevice device;VkCommandBuffer command;XvBuffer staging;XvTarget main,off,vram;
- RECT16 offRect;int offscreen,drawPrim,vramCPUChanged,vramGPUChanged,mainValid,mainResolved;
+ RECT16 offRect;int offscreen,drawPrim,vramCPUChanged,vramGPUChanged,mainValid,mainResolved,clipEnabled,ui;
  unsigned format,texture,vertexCursor,vertexCount;BlendMode blend;
  struct {float rect[4],scale[4],flags[4],source[4];} state;u16 pixels[1024*512];
 } xv;
 static struct {unsigned unused;} xvCost;
 static int g_dbg_texturelessMode;
-static unsigned copies,mainCopies,offCopies,logs,clears;
+static unsigned copies,mainCopies,offCopies,logs,clears,meshUploads;
+/* Exact CPU raster of the mesh fixture: screen positions times six are
+ * integers (2.5x, 720/216 y), pixel centers 6x+3. Every interior pixel
+ * must be covered once under a top-left rule and inside its UV square. */
+static long long XvEdge(long long ax,long long ay,long long bx,long long by,long long px,long long py){return (bx-ax)*(py-ay)-(by-ay)*(px-ax);}
+static void XvRasterMesh(const GrVertex *v,int n){
+ static unsigned char cover[720][1280];memset(cover,0,sizeof(cover));
+ unsigned base=v[0].u<64?0:64;
+ for(int t=0;t<n;t+=3){
+  long long x[3],y[3];for(int i=0;i<3;i++){x[i]=15LL*v[t+i].x;y[i]=20LL*v[t+i].y;assert(v[t+i].u>=base && v[t+i].u<=base+63 && v[t+i].v>=base && v[t+i].v<=base+63);}
+  long long area=XvEdge(x[0],y[0],x[1],y[1],x[2],y[2]);assert(area!=0);
+  if(area<0){long long tx=x[1],ty=y[1];x[1]=x[2];y[1]=y[2];x[2]=tx;y[2]=ty;}
+  long long minX=x[0],maxX=x[0],minY=y[0],maxY=y[0];
+  for(int i=1;i<3;i++){if(x[i]<minX)minX=x[i];if(x[i]>maxX)maxX=x[i];if(y[i]<minY)minY=y[i];if(y[i]>maxY)maxY=y[i];}
+  int x0=(int)(minX/6)-1,x1=(int)(maxX/6)+1,y0=(int)(minY/6)-1,y1=(int)(maxY/6)+1;
+  if(x0<0)x0=0;if(y0<0)y0=0;if(x1>1279)x1=1279;if(y1>719)y1=719;
+  for(int py=y0;py<=y1;py++)for(int px=x0;px<=x1;px++){
+   long long cx=6LL*px+3,cy=6LL*py+3;int inside=1;
+   for(int e=0;e<3&&inside;e++){long long ax=x[e],ay=y[e],bx=x[(e+1)%3],by=y[(e+1)%3],w=XvEdge(ax,ay,bx,by,cx,cy);
+    int topLeft=(ay==by&&bx<ax)||(by<ay);inside=w>0||(w==0&&topLeft);}
+   if(inside)cover[py][px]++;}
+ }
+ for(int py=69;py<651;py++)for(int px=102;px<1178;px++)assert(cover[py][px]==1);
+ meshUploads++;
+}
 #define XV_CALL(x) do{if((x)!=VK_SUCCESS)exit(42);}while(0)
 static void XvLayout(XvTarget *t,VkImageLayout layout){t->layout=layout;}
 static void XvSubmit(void){}
@@ -61,12 +85,12 @@ static void NativeRenderer_UpdateVRAM(void){xv.vramCPUChanged=0;}
 static void NativeRenderer_SetTexture(unsigned id,TexFormat f){xv.texture=id;xv.format=f;}
 static unsigned NativeRenderer_GetWhiteTexture(void){return 2;}
 static unsigned NativeRenderer_GetVRAMTexture(void){return 1;}
-static void NativeRenderer_UpdateVertexBuffer(const GrVertex *v,int n){assert(n==(copies>=34?1536:6));}
-static void XvDrawTriangles(int first,int n,int filtering){assert(first==0 && n==(copies>=34?512:2));}
+static void NativeRenderer_UpdateVertexBuffer(const GrVertex *v,int n){assert(n==(copies>=40?19008:copies>=34?1536:6));if(copies>=40)XvRasterMesh(v,n);}
+static void XvDrawTriangles(int first,int n,int filtering){assert(first==0 && n==(copies>=40?6336:copies>=34?512:2));}
 static void XvPass(XvTarget *t){}
 void vkCmdClearAttachments(VkCommandBuffer c,uint32_t n,const VkClearAttachment *a,uint32_t nr,const VkClearRect *r){}
 void vkCmdClearColorImage(VkCommandBuffer cb,VkImage image,VkImageLayout layout,const VkClearColorValue *color,uint32_t n,const VkImageSubresourceRange *range){
- assert(copies==40 && layout==VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && n==1);
+ assert(copies==45 && layout==VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && n==1);
  assert(image==(VkImage)(uintptr_t)(clears?&xv.off:&xv.main));
  assert(range->aspectMask==VK_IMAGE_ASPECT_COLOR_BIT && range->baseMipLevel==0 && range->levelCount==1 && range->baseArrayLayer==0 && range->layerCount==1);
  for(unsigned i=0;i<4;i++)assert(color->float32[i]==0);clears++;
@@ -76,7 +100,7 @@ static void Platform_Log(const char *format,...){
  va_list ap;va_start(ap,format);unsigned check=va_arg(ap,unsigned);(void)va_arg(ap,unsigned);(void)va_arg(ap,unsigned);
  unsigned bad=va_arg(ap,unsigned),total=va_arg(ap,unsigned),r=va_arg(ap,unsigned),g=va_arg(ap,unsigned),b=va_arg(ap,unsigned);
  unsigned er=va_arg(ap,unsigned),eg=va_arg(ap,unsigned),eb=va_arg(ap,unsigned);
- assert(check==logs++ && !bad && total==(check>=34?65536:check>=30?506880:900));
+ assert(check==logs++ && !bad && total==(check>=40?626232:check>=34?65536:check>=30?506880:900));
  assert(abs((int)r-(int)er)<=1 && abs((int)g-(int)eg)<=1 && abs((int)b-(int)eb)<=1);va_end(ap);
 }
 '''+validator+r'''
@@ -87,6 +111,11 @@ void vkCmdCopyImageToBuffer(VkCommandBuffer cb,VkImage image,VkImageLayout layou
  size_t bytes=(size_t)target->width*target->height*4;
  if(bytes>xv.staging.size || region->bufferRowLength || region->bufferImageHeight)exit(42);
  memset(xv.staging.map,0,bytes);
+ if(copies>=40){
+  assert(target==&xv.main);
+  for(size_t i=0;i<bytes;i+=4){xv.staging.map[i]=copies==40?64:255;xv.staging.map[i+1]=xv.staging.map[i+2]=copies==40?64:0;}
+  MESH_DEFECT copies++;mainCopies++;return;
+ }
  if(copies>=34){
   const char *paths[]={SWEEP_PATHS};FILE *file=fopen(paths[copies-34],"rb");assert(file && target==&xv.off);
   for(unsigned y=0;y<256;y++)assert(fread(xv.staging.map+4*y*target->width,1,256*4,file)==256*4);
@@ -109,13 +138,15 @@ int main(void){
  xv.main.width=1280;xv.main.height=720;xv.off.width=1024;xv.off.height=512;
  xv.main.image=(VkImage)(uintptr_t)&xv.main;xv.off.image=(VkImage)(uintptr_t)&xv.off;
  xv.staging.size=ALLOCATION_BYTES;xv.staging.map=malloc(xv.staging.size);assert(xv.staging.map);
- XvColorCheck();assert(logs==40 && copies==40 && mainCopies==10 && offCopies==30);
+ XvColorCheck();assert(logs==45 && copies==45 && mainCopies==15 && offCopies==30 && meshUploads==5);
  assert(clears==2 && xv.main.clearStencil && xv.off.clearStencil);
  assert(xv.mainValid==0 && xv.mainResolved==0);free(xv.staging.map);
- puts("PASS: all 40 actual boot checks including color/index sweeps; independent fixture pixels, whole-level validator, staging capacity and pitch");
+ puts("PASS: all 45 actual boot checks including color/index sweeps and mesh coverage/UV range; independent fixture pixels, exact watertight mesh raster, whole-level validator, staging capacity and pitch");
 }
 '''
 c=c.replace('ALLOCATION_BYTES',allocate)
+c_meshless=c
+c=c.replace('MESH_DEFECT ','')
 # Independent Python pixel model, quantized as a GPU RGBA8 target would be.
 paths=[]
 for case in range(6):
@@ -148,3 +179,11 @@ print('PASS: prior partial-main copy, undersized staging and fixed-1024 read pit
 dirty=c.replace('XvClearDiagnosticTarget(&xv.main);XvClearDiagnosticTarget(&xv.off);','')
 assert dirty!=c and run(dirty,'diagnostic-residue-negative').returncode!=0
 print('PASS: both diagnostic targets cleared before game; leaving test pixels rejected')
+def sweep_paths(text):return text.replace('SWEEP_PATHS',','.join(paths))
+gap=sweep_paths(c_meshless.replace('MESH_DEFECT ','if(copies==40)xv.staging.map[4*(300*1280+500)]=0;'))
+assert run(gap,'mesh-gap-negative').returncode!=0
+drift=sweep_paths(c_meshless.replace('MESH_DEFECT ','if(copies==43){xv.staging.map[4*(400*1280+700)]=0;xv.staging.map[4*(400*1280+700)+2]=255;}'))
+assert run(drift,'uv-drift-negative').returncode!=0
+torn=c.replace('const unsigned order[2][6]={{0,1,2,2,1,3},{0,1,3,0,3,2}};','const unsigned order[2][6]={{0,1,2,0,1,2},{0,1,3,0,3,2}};')
+assert torn!=c and run(torn,'mesh-fixture-negative').returncode!=0
+print('PASS: mesh gap, out-of-range UV pixel and torn mesh fixture rejected')

@@ -133,10 +133,13 @@ void NativeHD_RenderIntermediate(struct GameTracker *gGT)
 
     /* Loading, menus, split-screen and pause remain on the original route.
      * Reset history across transitions and camera cuts to avoid blending
-     * unrelated scenes or interpolating a respawn across the course. */
+     * unrelated scenes or interpolating a respawn across the course.
+     * The checkered flag also stays there while it slides off over the race
+     * intro: RaceFlag_GetOT advances its slide when drawn and the flag is not
+     * in the HUD replay, so a midpoint would show alternate frames without it. */
     if (!g_nativeHDEnableInterpolation || sdata->Loading.stage != LOAD_IDLE || level == NULL || level->ptr_mesh_info == NULL ||
         gGT->numPlyrCurrGame != 1 || (gGT->gameMode1 & (LOADING | MAIN_MENU | GAME_CUTSCENE | ADVENTURE_ARENA | PAUSE_ALL | END_OF_RACE)) != 0 ||
-        (gGT->renderFlags & (RENDER_FLAG_DRAW_LEVEL | RENDER_FLAG_RENDER_BUCKET)) != (RENDER_FLAG_DRAW_LEVEL | RENDER_FLAG_RENDER_BUCKET))
+        (gGT->renderFlags & (RENDER_FLAG_DRAW_LEVEL | RENDER_FLAG_RENDER_BUCKET | RENDER_FLAG_CHECKERED_FLAG)) != (RENDER_FLAG_DRAW_LEVEL | RENDER_FLAG_RENDER_BUCKET))
     {
         s_hdLevel = NULL;
         s_hdPoseCount = 0;

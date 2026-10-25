@@ -43,7 +43,7 @@ def main():
         return vram[(y % 512) * 1024 + x % 1024]
 
     def reference_word(fmt, x, y):
-        x, y = math.floor(x) % 256, math.floor(y) % 256
+        x, y = (min(255, max(0, math.floor(c))) for c in (x, y))
         if fmt == 2:
             return read(page[0] + x, page[1] + y)
         packed = read(page[0] + (x // (4 if fmt == 0 else 2)), page[1] + y)
@@ -69,7 +69,7 @@ def main():
         dc = uv if dc is None else dc
         got = simulate.run(blob, registers={0: [*rgba[:3],dc[1]], 1: [*uv,dc[0],dither],
                                            2: page}, constants=constants, texture_fetch=sample)
-        sample_uv=(uv[0]+1/4096,uv[1]+1/4096)
+        sample_uv=tuple(min(255,max(0,c+1/4096)) for c in uv)
         nearest = reference_word(shader // 2, *sample_uv) if shader < 6 else 32767
         stp = bool(nearest & 32768)
         killed = shader < 6 and (nearest == 0 or (flags[0] == 1 and stp) or (flags[0] == 2 and not stp))
@@ -114,7 +114,7 @@ def main():
                 vram[256 * 1024 + 64] = byte | ((255-byte) << 8)
                 for lane in range((4, 2, 1)[fmt]):
                     check(fmt * 2, (lane + 0.25, 0.25))
-            # Neighboring texels, wrap at both UV edges, and transparent filtering.
+            # Neighboring texels, clamp at both UV edges, and transparent filtering.
             for y in (0, 1, 255):
                 for x in range(256):
                     vram[(256+y)*1024 + 64+x] = ((x*733 + y*97) & 65535)
@@ -130,12 +130,14 @@ def main():
                     for y in range(4):
                         for rgba in ((0.5,0.25,0.75,1),(2,1,0.5,1)):
                             check(shader,(2.5,0.5),rgba=rgba,dither=dither,dc=(x,y))
-        # Physical VRAM wrap is now done by the repeat sampler. UV wrapping
-        # remains local to the 256x256 page, before packed-index addressing.
+        # Physical VRAM wrap is now done by the repeat sampler. UV drift past
+        # a 0/255 vertex byte (or the filtered sprite half-texel offset) clamps
+        # to the page edge texel; it must not wrap to the opposite page edge.
         vram[:] = [(i*1237+31)&65535 for i in range(len(vram))]
         for page in ([960,256,1008,511],[960,512,1008,511],[0,0,0,0]):
             for shader in range(6):
-                for uv in ((0.25,0.75),(255.75,255.5),(-0.25,-0.5),(256.5,256.5)):
+                for uv in ((0.25,0.75),(255.75,255.5),(-0.25,-0.5),(256.5,256.5),
+                           (-0.001,0.5),(0.5,-0.01),(-0.3,-0.3),(255.2,0.5),(-0.5,255.25)):
                     for flags in ((0,0,1,0),(1,1,0,0),(2,0,1,0)):
                         check(shader,uv,flags)
         page=[64,256,16,480]
@@ -153,7 +155,7 @@ def main():
                           for shift in (5,10,15) for n in range(33) for delta in (-1,0,1)}):
             vram[256*1024+64]=word
             check(4,(0.25,0.75),(0,0,1,0))
-    print('PASS: %d actual bundled pixel-shader cases: all packed lanes, palette/STP, transparency, filtering, UV wrap, flat colors' % count)
+    print('PASS: %d actual bundled pixel-shader cases: all packed lanes, palette/STP, transparency, filtering, UV edge clamp, flat colors' % count)
 
 
 if __name__ == '__main__':

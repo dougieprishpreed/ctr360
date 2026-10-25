@@ -282,6 +282,22 @@ void PushBuffer_SetDrawEnv_Normal(void *ot, struct PushBuffer *pb, struct DB *ba
 	}
 }
 
+#ifdef _XBOX
+/* Link pb's own clip/offset as part of the 4:3 UI pass, for HUD art that
+ * retail draws through a player's world OT but HD must squeeze/replay. */
+void PushBuffer_SetDrawEnv_HUDLayer(void *ot, struct PushBuffer *pb, struct DB *backBuffer)
+{
+    u8 *packet = (u8 *)backBuffer->primMem.cursor;
+
+    PushBuffer_SetDrawEnv_Normal(ot, pb, backBuffer, 0, 0);
+    if ((u8 *)backBuffer->primMem.cursor == packet + 0x40)
+    {
+        DR_ENV *envPacket = (DR_ENV *)packet;
+        CtrGpu_WriteControlWord(&envPacket->code[2], CTR_ReadU32LE(&envPacket->code[2]) | 0x00800000u);
+    }
+}
+#endif
+
 void PushBuffer_SetMatrixVP(struct PushBuffer *pb)
 {
 	// CameraMatrix

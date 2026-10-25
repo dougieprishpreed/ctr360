@@ -28,6 +28,8 @@ enum UIWeaponConstants
 	UI_WEAPON_BG_SHINE_ICON_INDEX = 0x31,
 	UI_WEAPON_BG_SHINE_COUNT = 2,
 	UI_WEAPON_BG_SHINE_TRANSPARENCY_BASE = 2,
+	// UI OT slot drawn first, right after RenderDispEnv_UI's environment
+	UI_WEAPON_BG_SHINE_HUD_SLOT = 4,
 };
 
 
@@ -199,6 +201,20 @@ void UI_Weapon_DrawBG(s16 posX, s16 posY, s16 scale, struct Driver *d)
 
 	int shineScale = scaleInt * UI_WEAPON_BG_SHINE_SCALE_MUL >> UI_WEAPON_BG_SHINE_SCALE_SHIFT;
 
+	// pointer to OTMem
+	u32 *ot = gGT->pushBuffer[d->driverID].ptrOT;
+
+#ifdef _XBOX
+	// Retail's front player-OT slot draws the shine after the world but behind
+	// every UI OT slot (the 1P fruit model is linked into UI slot 0), using the
+	// player's viewport offset/clip: multiplayer shine positions are
+	// viewport-relative. HD squeezes and replays only the UI pass, so draw it
+	// first there under the player's environment. Slots are LIFO: link the UI
+	// environment restore before the shine, the player environment after it.
+	ot = &gGT->pushBuffer_UI.ptrOT[UI_WEAPON_BG_SHINE_HUD_SLOT];
+	PushBuffer_SetDrawEnv_Normal(ot, &gGT->pushBuffer_UI, gGT->backBuffer, 0, 0);
+#endif
+
 	for (int i = 0; i < UI_WEAPON_BG_SHINE_COUNT; i++)
 	{
 		UI_WeaponBG_DrawShine(
@@ -211,11 +227,14 @@ void UI_Weapon_DrawBG(s16 posX, s16 posY, s16 scale, struct Driver *d)
 		    // pointer to PrimMem struct
 		    &gGT->backBuffer->primMem,
 
-		    // Match the HUD icons' transform and interpolated-frame capture.
-		    gGT->pushBuffer_UI.ptrOT,
+		    ot,
 
 		    UI_WEAPON_BG_SHINE_TRANSPARENCY_BASE + i, scaleInt, shineScale, UI_WEAPON_BG_SHINE_COLOR);
 	}
+
+#ifdef _XBOX
+	PushBuffer_SetDrawEnv_HUDLayer(ot, &gGT->pushBuffer[d->driverID], gGT->backBuffer);
+#endif
 
 	return;
 }

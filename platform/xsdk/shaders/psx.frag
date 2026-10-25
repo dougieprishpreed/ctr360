@@ -19,7 +19,7 @@ vec4 unpackColor(float w) {
     return vec4(shifted.xyz-shifted.yzw*32.0,shifted.w)/vec4(31,31,31,1);
 }
 float textureWord(vec2 uv,vec4 pg) {
-    // UV is already integral and wrapped to this 256x256 page.
+    // UV is already integral and clamped to this 256x256 page.
     float w;
     #if XV_FORMAT == 0
     {
@@ -58,8 +58,11 @@ void main() {
     // interpolation roundoff below a constant UV from selecting its previous
     // texel/transparent mask. Use one consistent, exactly representable bias
     // for coverage and filtering, rather than a fifth nearest fetch.
-    vec2 uv=tc.xy+vec2(1.0/4096.0);
-    vec2 p=mod(floor(uv),256.0);
+    // Vertex UVs are bytes, so PSX interpolation stays inside 0..255. Clamp
+    // drift and the filtered sprite half-texel offset there; wrapping would
+    // sample a texel from the opposite edge of the page instead.
+    vec2 uv=clamp(tc.xy+vec2(1.0/4096.0),0.0,255.0);
+    vec2 p=floor(uv);
     float nearest=textureWord(p,pg);
     float stp=step(32768.0,nearest);
     // Pass is exactly 0 (all), 1 (opaque subset), or 2 (STP subset).
@@ -70,9 +73,9 @@ void main() {
 #elif XV_FILTER
     {
         vec2 f=fract(uv);
-        vec2 next=mix(p+1.0,vec2(0),step(vec2(255),p));
-        // Share address rounding/wrapping across all four taps. Neighbor
-        // coordinates still wrap at the PSX page edge before packed fetches.
+        // Share address rounding/clamping across all four taps. At 255 the
+        // clamped weight is zero, so the neighbor never leaves the page.
+        vec2 next=min(p+1.0,vec2(255));
         c=mix(mix(vec4(unpackColor(nearest).rgb,1),samplePSX(vec2(next.x,p.y),pg),f.x),
               mix(samplePSX(vec2(p.x,next.y),pg),samplePSX(next,pg),f.x),f.y);
         c.rgb/=max(c.a,0.0001);

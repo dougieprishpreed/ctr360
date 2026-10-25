@@ -614,6 +614,9 @@ void PushBuffer_SetMatrixVP(struct PushBuffer *pb);
 void PushBuffer_SetDrawEnv_DecalMP(void *ot, struct DB *backBuffer, RECT *viewport, s16 offsetX, s16 offsetY, u8 dtd, u8 dfe, u8 isbg, u8 tpageUpper,
                                    u8 tpageLower);
 void PushBuffer_SetDrawEnv_Normal(void *ot, struct PushBuffer *pb, struct DB *backBuffer, s16 *copyDrawEnvNULL, int isbg);
+#ifdef _XBOX
+void PushBuffer_SetDrawEnv_HUDLayer(void *ot, struct PushBuffer *pb, struct DB *backBuffer);
+#endif
 
 void PushBuffer_FadeOneWindow(struct PushBuffer *pb);
 void PushBuffer_FadeAllWindows(void);

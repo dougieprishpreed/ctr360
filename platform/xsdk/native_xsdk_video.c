@@ -1,6 +1,7 @@
 /* Experimental Vulkan 1.0 backend for xSDK/vulkan4xenon.
- * PSX textures remain packed bytes; only decoded color is filtered. Submission
- * is serialized for bring-up, with all upload storage retained until its fence.
+ * PSX textures remain packed bytes; only decoded color is filtered. A presented
+ * frame runs on the GPU while the next is recorded into the other frame slot;
+ * uploads, readbacks and storage reuse drain the queue first.
  */
 #include <vulkan/vulkan.h>
 #include <vulkan4xenon.h>
@@ -13,7 +14,8 @@
 #include <stddef.h>
 #include "ctr_shaders.h"
 
-enum { XV_WIDTH=1280,XV_HEIGHT=720,XV_VERTEX_BYTES=16*1024*1024,XV_UNIFORM_BYTES=2*1024*1024 };
+enum { XV_WIDTH=1280,XV_HEIGHT=720,XV_VERTEX_BYTES=16*1024*1024,XV_UNIFORM_BYTES=2*1024*1024,
+       XV_VERTEX_SLOT_BYTES=XV_VERTEX_BYTES/2,XV_UNIFORM_SLOT_BYTES=XV_UNIFORM_BYTES/2 };
 typedef struct { VkBuffer buffer;VkDeviceMemory memory;unsigned char *map;size_t size; } XvBuffer;
 typedef struct {
     VkImage image;VkDeviceMemory memory;VkImageView view;
@@ -35,7 +37,8 @@ static struct {
     VkInstance instance;VkPhysicalDevice physical;VkDevice device;VkQueue queue;
     VkSurfaceKHR surface;VkSwapchainKHR swapchain;unsigned imageCount;
     XvTarget swap[3],main,off,vram;
-    VkRenderPass passes[4];VkCommandPool pool;VkCommandBuffer command;VkFence fence;
+    VkRenderPass passes[4];VkCommandPool pool;VkCommandBuffer command,commands[2];VkFence fence,fences[2],acquireFence;
+    unsigned slot;int pending[2];
     VkDescriptorSetLayout setLayout;VkPipelineLayout pipelineLayout;VkDescriptorPool descriptors;
     VkDescriptorSet sets[4];VkSampler sampler,linearSampler,vramSampler;
     VkShaderModule shaders[20];VkPipeline pipelines[3][18][5][3];
@@ -133,9 +136,11 @@ static void XvBegin(void)
     XV_CALL(vkBeginCommandBuffer(xv.command,&begin));xv.recording=1;
 }
 static void XvEndPass(void) { if(xv.inPass){vkCmdEndRenderPass(xv.command);xv.inPass=0;} }
-static void XvSubmit(void)
+/* Each frame slot owns a command buffer, its fence and half of the vertex and
+ * uniform storage. The queue replays in order, so a slot's fence also covers
+ * every earlier submission. xsdk_present_end flips only after a frame's fence. */
+static void XvQueue(void)
 {
-    if(!xv.recording)return;
     XvEndPass();XV_CALL(vkEndCommandBuffer(xv.command));
     VkSubmitInfo submit={.sType=VK_STRUCTURE_TYPE_SUBMIT_INFO,.commandBufferCount=1,.pCommandBuffers=&xv.command};
     VkMappedMemoryRange ranges[2]={
@@ -144,12 +149,35 @@ static void XvSubmit(void)
     if(xv.vertices.memory)XV_CALL(vkFlushMappedMemoryRanges(xv.device,2,ranges));
     unsigned started=GetTickCount();
     XV_CALL(vkQueueSubmit(xv.queue,1,&submit,xv.fence));
-    unsigned submitted=GetTickCount();
-    XV_CALL(vkWaitForFences(xv.device,1,&xv.fence,VK_TRUE,UINT64_MAX));
-    xvCost.submits++;xvCost.submitMS+=submitted-started;xvCost.waitMS+=GetTickCount()-submitted;
-    XV_CALL(vkResetFences(xv.device,1,&xv.fence));
-    XV_CALL(vkResetCommandBuffer(xv.command,0));
-    xv.recording=0;xv.uniformCursor=0;
+    xvCost.submits++;xvCost.submitMS+=GetTickCount()-started;
+    xv.pending[xv.slot]=1;xv.recording=0;
+}
+static unsigned XvWait(unsigned slot)
+{
+    if(!xv.pending[slot])return 0;
+    unsigned started=GetTickCount();
+    XV_CALL(vkWaitForFences(xv.device,1,&xv.fences[slot],VK_TRUE,UINT64_MAX));
+    unsigned waited=GetTickCount()-started;xvCost.waitMS+=waited;
+    XV_CALL(vkResetFences(xv.device,1,&xv.fences[slot]));
+    XV_CALL(vkResetCommandBuffer(xv.commands[slot],0));
+    xv.pending[slot]=0;return waited;
+}
+/* Drain: the other slot's frame first, then this slot's work. */
+static void XvSubmit(void)
+{
+    XvWait(xv.slot^1);
+    if(xv.recording)XvQueue();
+    XvWait(xv.slot);
+    xv.uniformCursor=xv.slot*XV_UNIFORM_SLOT_BYTES;
+}
+/* Queue the presented frame without waiting. Record the next one into the
+ * other slot once the previously presented frame, its last user, is done. */
+static void XvSubmitFrame(void)
+{
+    XvQueue();
+    xv.slot^=1;xv.command=xv.commands[xv.slot];xv.fence=xv.fences[xv.slot];
+    xvCost.frameWaitMS+=XvWait(xv.slot);
+    xv.uniformCursor=xv.slot*XV_UNIFORM_SLOT_BYTES;
 }
 static void XvLayout(XvTarget *target,VkImageLayout layout)
 {
@@ -260,7 +288,7 @@ static VkPipeline XvPipeline(unsigned pass,int shader,BlendMode blend,int stenci
 static void XvReserveUniform(void)
 {
     unsigned stride=(sizeof(XvUniform)+xv.uniformAlignment-1)&~(xv.uniformAlignment-1);
-    if(xv.uniformCursor+stride>XV_UNIFORM_BYTES){XvTarget *target=xv.target;XvSubmit();XvPass(target);}
+    if(xv.uniformCursor+stride>(xv.slot+1)*XV_UNIFORM_SLOT_BYTES){XvTarget *target=xv.target;XvSubmit();XvPass(target);}
 }
 static void XvBindUniform(const XvUniform *state,unsigned texture)
 {
@@ -373,9 +401,12 @@ int NativeRenderer_InitialiseRender(char *name,int width,int height,int fullscre
     VkImage images[3];xv.imageCount=3;XV_CALL(vkGetSwapchainImagesKHR(xv.device,xv.swapchain,&xv.imageCount,images));
     VkCommandPoolCreateInfo pool={.sType=VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,.flags=VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT};
     XV_CALL(vkCreateCommandPool(xv.device,&pool,NULL,&xv.pool));
-    VkCommandBufferAllocateInfo command={.sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,.commandPool=xv.pool,.level=VK_COMMAND_BUFFER_LEVEL_PRIMARY,.commandBufferCount=1};
-    XV_CALL(vkAllocateCommandBuffers(xv.device,&command,&xv.command));
-    VkFenceCreateInfo fence={.sType=VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};XV_CALL(vkCreateFence(xv.device,&fence,NULL,&xv.fence));
+    VkCommandBufferAllocateInfo command={.sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,.commandPool=xv.pool,.level=VK_COMMAND_BUFFER_LEVEL_PRIMARY,.commandBufferCount=2};
+    XV_CALL(vkAllocateCommandBuffers(xv.device,&command,xv.commands));
+    VkFenceCreateInfo fence={.sType=VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    for(unsigned i=0;i<2;i++)XV_CALL(vkCreateFence(xv.device,&fence,NULL,&xv.fences[i]));
+    XV_CALL(vkCreateFence(xv.device,&fence,NULL,&xv.acquireFence));
+    xv.slot=0;xv.command=xv.commands[0];xv.fence=xv.fences[0];
     XvCreatePasses();
     for(unsigned i=0;i<xv.imageCount;i++){
         XvTarget *t=&xv.swap[i];t->image=images[i];t->width=XV_WIDTH;t->height=XV_HEIGHT;t->pass=2;
@@ -448,7 +479,10 @@ void NativeRenderer_ResetDevice(void) {}
 void NativeRenderer_UpdateSwapIntervalState(int interval) { (void)interval; }
 void NativeRenderer_BeginScene(void)
 {
-    XvSubmit();xv.vertexCursor=0;xv.vertexCount=0;xv.mainValid=0;xv.mainResolved=0;xv.offscreen=0;
+    // Work recorded since the last present may use this slot's vertices;
+    // drain it before rewinding. Normally the slot is already free.
+    if(xv.recording)XvSubmit();
+    xv.vertexCursor=xv.slot*XV_VERTEX_SLOT_BYTES;xv.vertexCount=0;xv.mainValid=0;xv.mainResolved=0;xv.offscreen=0;
     NativeRenderer_UpdateVRAM();xv.main.clearStencil=1;XvPass(&xv.main);
 }
 void NativeRenderer_EndScene(void) { XvEndPass(); }
@@ -486,7 +520,7 @@ void NativeRenderer_UpdateVertexBuffer(const GrVertex *vertices,int count)
 {
     if(count<=0)return;if(count>(int)MAX_VERTEX_BUFFER_SIZE)count=MAX_VERTEX_BUFFER_SIZE;
     size_t bytes=count*sizeof(XvVertex);
-    if(xv.vertexCursor+bytes>XV_VERTEX_BYTES){XvSubmit();xv.vertexCursor=0;}
+    if(xv.vertexCursor+bytes>(xv.slot+1)*XV_VERTEX_SLOT_BYTES){XvSubmit();xv.vertexCursor=xv.slot*XV_VERTEX_SLOT_BYTES;}
     xv.vertexBase=xv.vertexCursor;xv.vertexCount=count;
     // Draw calls consume this upload synchronously before the next upload.
     // Read CLUT metadata from cached CPU vertices, never GPU-mapped memory.
@@ -637,17 +671,17 @@ void NativeRenderer_StoreFeedback(int x,int y,int w,int h)
 void NativeRenderer_PresentVRAMRect(int x,int y,int w,int h)
 {
     if(w<=0 || h<=0)return;NativeRenderer_UpdateVRAM();
-    /* The previous frame has already fenced. Acquisition can precede this
-     * frame's submit: render, resolve and presentation stay in queue order.
-     * Keep one final fence before reusing any vertex/uniform storage. */
+    /* Acquisition can precede this frame's submit: render, resolve and
+     * presentation stay in queue order, and the flip waits for the frame's
+     * fence. The previous frame may still be drawing; its slot is separate. */
     unsigned started=GetTickCount();
-    unsigned index=0;XV_CALL(vkAcquireNextImageKHR(xv.device,xv.swapchain,UINT64_MAX,VK_NULL_HANDLE,xv.fence,&index));
-    XV_CALL(vkWaitForFences(xv.device,1,&xv.fence,VK_TRUE,UINT64_MAX));XV_CALL(vkResetFences(xv.device,1,&xv.fence));
+    unsigned index=0;XV_CALL(vkAcquireNextImageKHR(xv.device,xv.swapchain,UINT64_MAX,VK_NULL_HANDLE,xv.acquireFence,&index));
+    XV_CALL(vkWaitForFences(xv.device,1,&xv.acquireFence,VK_TRUE,UINT64_MAX));XV_CALL(vkResetFences(xv.device,1,&xv.acquireFence));
     xvCost.acquireMS+=GetTickCount()-started;
     if(xv.mainResolved)XvQuad(&xv.swap[index],&xv.main,xvEdgeAA?3:0,0,0,XV_WIDTH,XV_HEIGHT,0,0,1,1);
     else XvQuad(&xv.swap[index],&xv.vram,2,0,0,XV_WIDTH,XV_HEIGHT,x/1024.0f,y/512.0f,w/1024.0f,h/512.0f);
     XvLayout(&xv.swap[index],VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-    unsigned waitBefore=xvCost.waitMS;XvSubmit();xvCost.frameWaitMS+=xvCost.waitMS-waitBefore;
+    XvSubmitFrame();
     VkPresentInfoKHR present={.sType=VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,.swapchainCount=1,.pSwapchains=&xv.swapchain,.pImageIndices=&index};
     started=GetTickCount();XV_CALL(vkQueuePresentKHR(xv.queue,&present));xvCost.presentMS+=GetTickCount()-started;
     static unsigned lastReport=0,frames=0;frames++;
@@ -773,6 +807,71 @@ static void XvColorSweep(void)
             check,firstX,firstY,firstRGB[0],firstRGB[1],firstRGB[2],firstExpected[0],firstExpected[1],firstExpected[2]);
     }
 }
+/* Game-like meshes: thousands of small jittered triangles at integral PSX
+ * vertices through the world projection onto the 720p main target. Check 40
+ * adds 64 per covering triangle to find raster gaps/overlaps at shared edges
+ * and vertices. Checks 41-44 map every triangle onto a red 64x64 texel square
+ * surrounded by transparent texels over a blue background: any blue is a
+ * sample outside the triangles' own UVs. 41/42 start at UV 0 (edge clamp);
+ * 43/44 start at 64, which no clamp hides, measuring raw UV drift. */
+static void XvMeshCheck(void)
+{
+    enum {COLUMNS=72,ROWS=44,LEFT=102,RIGHT=1178,TOP=69,BOTTOM=651,COUNT=COLUMNS*ROWS*6};
+    static s16 gridX[(COLUMNS+1)*(ROWS+1)],gridY[(COLUMNS+1)*(ROWS+1)];
+    GrVertex *vertices=malloc(COUNT*sizeof(*vertices));
+    if(!vertices){Platform_Log("[vulkan-check] mesh fixture allocation failed\n");return;}
+    unsigned seed=0x2545f491u;
+    for(unsigned row=0;row<=ROWS;row++)for(unsigned col=0;col<=COLUMNS;col++){
+        int jitter=row>0 && row<ROWS && col>0 && col<COLUMNS;
+        seed=seed*1664525u+1013904223u;
+        gridX[row*(COLUMNS+1)+col]=(s16)(40+col*6+(jitter?(int)(seed>>30)%3-1:0));
+        gridY[row*(COLUMNS+1)+col]=(s16)(20+row*4+(jitter?(int)((seed>>27)&3)%3-1:0));
+    }
+    xv.offscreen=0;xv.drawPrim=1;xv.clipEnabled=0;xv.ui=0;
+    xv.state.rect[2]=512;xv.state.rect[3]=216;memset(xv.state.flags,0,sizeof(xv.state.flags));
+    for(unsigned check=40;check<45;check++){
+        unsigned flat=check==40,filtering=check==42 || check==44,base=check>=43?64:0;
+        memset(xv.pixels,0,sizeof(xv.pixels));
+        xv.pixels[480*1024+1]=0x001f;
+        for(unsigned v=base;v<base+64;v++)for(unsigned u=base;u<base+64;u++)
+            xv.pixels[v*1024+512+u/4]|=(u16)(1u<<((u&3)*4));
+        seed=0x9e3779b9u;
+        for(unsigned cell=0;cell<COLUMNS*ROWS;cell++){
+            unsigned col=cell%COLUMNS,row=cell/COLUMNS,corner[4]={row*(COLUMNS+1)+col,row*(COLUMNS+1)+col+1,(row+1)*(COLUMNS+1)+col,(row+1)*(COLUMNS+1)+col+1};
+            seed=seed*1664525u+1013904223u;
+            const unsigned order[2][6]={{0,1,2,2,1,3},{0,1,3,0,3,2}};
+            for(unsigned i=0;i<6;i++){
+                unsigned c=order[seed>>31][i];GrVertex *vertex=&vertices[cell*6+i];
+                memset(vertex,0,sizeof(*vertex));
+                vertex->x=gridX[corner[c]];vertex->y=gridY[corner[c]];
+                vertex->u=(u8)(base+(c&1)*63);vertex->v=(u8)(base+(c>>1)*63);
+                vertex->page=8;vertex->clut=480*64;vertex->bright=1;
+                vertex->r=vertex->g=vertex->b=flat?64:255;vertex->a=255;
+            }
+        }
+        NativeRenderer_SetTexture(flat?NativeRenderer_GetWhiteTexture():NativeRenderer_GetVRAMTexture(),TF_4_BIT);
+        xv.blend=flat?BM_ADD:BM_NONE;
+        xv.vramCPUChanged=1;NativeRenderer_UpdateVRAM();xv.main.clearStencil=1;XvPass(&xv.main);
+        VkClearAttachment clear={.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT,.colorAttachment=0,.clearValue.color.float32={0,0,flat?0:1,0}};
+        VkClearRect rect={.rect={{0,0},{XV_WIDTH,XV_HEIGHT}},.layerCount=1};vkCmdClearAttachments(xv.command,1,&clear,1,&rect);
+        NativeRenderer_UpdateVertexBuffer(vertices,COUNT);XvDrawTriangles(0,COUNT/3,filtering);XvReadTarget(&xv.main);
+        unsigned bad=0,blue=0,firstX=0,firstY=0;unsigned char firstRGB[3]={0};
+        for(unsigned y=TOP;y<BOTTOM;y++)for(unsigned x=LEFT;x<RIGHT;x++){
+            unsigned char *pixel=xv.staging.map+4*(y*xv.main.width+x);
+            int wrong=flat?abs(pixel[0]-64)>2 || abs(pixel[1]-64)>2 || abs(pixel[2]-64)>2:pixel[0]<200 || pixel[1]>16 || pixel[2]>16;
+            if(!wrong)continue;
+            if(!bad){firstX=x;firstY=y;memcpy(firstRGB,pixel,3);}
+            bad++;blue+=flat?pixel[2]<32:pixel[2]>128;
+        }
+        unsigned char *sample=xv.staging.map+4*(360*xv.main.width+640);
+        Platform_Log("[vulkan-check] check=%u format=%u filter=%u wrong=%u/%u sample=%u,%u,%u expected=%u,%u,%u kind=%s blend=%u\n",
+            check,0u,filtering,bad,(unsigned)((RIGHT-LEFT)*(BOTTOM-TOP)),sample[0],sample[1],sample[2],flat?64u:255u,flat?64u:0u,flat?64u:0u,
+            flat?"mesh-coverage":base?"uv-drift":"uv-edge",(unsigned)xv.blend);
+        if(bad)Platform_Log("[vulkan-mesh] check=%u first=%u,%u got=%u,%u,%u %s=%u other=%u\n",
+            check,firstX,firstY,firstRGB[0],firstRGB[1],firstRGB[2],flat?"gaps":"blue",blue,bad-blue);
+    }
+    free(vertices);
+}
 static void XvColorCheck(void)
 {
     const u16 colors[]={0x001f,0x03e0,0x7c00,0x7fff};
@@ -859,6 +958,7 @@ static void XvColorCheck(void)
             stress?"raster-stress":blending?"blend":modulation?(xv.offscreen?"modulated":"main-modulated"):check==12?"debug-flat":flat?"flat":"textured",(unsigned)xv.blend);
     }
     XvColorSweep();
+    XvMeshCheck();
     g_dbg_texturelessMode=0;xv.blend=BM_NONE;
     memset(xv.pixels,0,sizeof(xv.pixels));xv.vramCPUChanged=1;xv.vramGPUChanged=0;
     xv.offscreen=0;xv.drawPrim=0;xv.texture=NativeRenderer_GetVRAMTexture();xv.format=TF_4_BIT;xv.vertexCursor=0;xv.vertexCount=0;
@@ -893,7 +993,8 @@ void NativeRenderer_Shutdown(void)
     vkDestroySampler(xv.device,xv.vramSampler,NULL);
     vkDestroyPipelineLayout(xv.device,xv.pipelineLayout,NULL);vkDestroyDescriptorSetLayout(xv.device,xv.setLayout,NULL);
     for(unsigned i=0;i<4;i++)vkDestroyRenderPass(xv.device,xv.passes[i],NULL);
-    vkDestroyFence(xv.device,xv.fence,NULL);vkDestroyCommandPool(xv.device,xv.pool,NULL);
+    for(unsigned i=0;i<2;i++)vkDestroyFence(xv.device,xv.fences[i],NULL);
+    vkDestroyFence(xv.device,xv.acquireFence,NULL);vkDestroyCommandPool(xv.device,xv.pool,NULL);
     vkDestroySwapchainKHR(xv.device,xv.swapchain,NULL);vkDestroyDevice(xv.device,NULL);
     vkDestroySurfaceKHR(xv.instance,xv.surface,NULL);vkDestroyInstance(xv.instance,NULL);memset(&xv,0,sizeof(xv));
 }

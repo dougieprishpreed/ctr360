@@ -33,7 +33,7 @@ struct GameTracker {
 };
 static struct {struct {int stage;} Loading;} data,*sdata=&data;
 enum {LOAD_IDLE=0,LOADING=1,MAIN_MENU=2,GAME_CUTSCENE=4,ADVENTURE_ARENA=8,PAUSE_ALL=16,END_OF_RACE=32};
-enum {RENDER_FLAG_DRAW_LEVEL=1,RENDER_FLAG_RENDER_BUCKET=2,RENDER_FLAG_CLEAR_BACK_BUFFER=4,RENDER_FLAG_EFFECT_BUCKETS=8,RENDER_FLAG_RAIN=16,RENDER_FLAG_BEAKER_RAIN=32,RENDER_FLAG_STARS=64};
+enum {RENDER_FLAG_DRAW_LEVEL=1,RENDER_FLAG_RENDER_BUCKET=2,RENDER_FLAG_CLEAR_BACK_BUFFER=4,RENDER_FLAG_EFFECT_BUCKETS=8,RENDER_FLAG_RAIN=16,RENDER_FLAG_BEAKER_RAIN=32,RENDER_FLAG_STARS=64,RENDER_FLAG_CHECKERED_FLAG=128};
 static u16 CTR_ReadU16LE(const void*p){const u8*b=p;return b[0]|((u16)b[1]<<8);}
 static void CTR_WriteU16LE(void*p,u16 v){u8*b=p;b[0]=(u8)v;b[1]=(u8)(v>>8);}
 static int renders,vsyncs,captures,hudValid=1;
@@ -104,6 +104,7 @@ int main(void){
  g.gameMode1=0;g.level1=&other;NativeHD_RenderIntermediate(&g);assert(renders==r);
  g.pushBuffer[0].pos.x+=1500;NativeHD_RenderIntermediate(&g);assert(renders==r);
  g.numPlyrCurrGame=2;NativeHD_RenderIntermediate(&g);assert(renders==r);
+ g.numPlyrCurrGame=1;g.renderFlags|=RENDER_FLAG_CHECKERED_FLAG;NativeHD_RenderIntermediate(&g);assert(renders==r);
  /* Indexed lookup preserves identities across reordered lists and collisions. */
  struct Instance many[512];struct Model otherModel={2};
  s_hdPoseCount=512;
@@ -112,7 +113,7 @@ int main(void){
  for(i=0;i<512;i++){assert(NativeHD_FindPreviousPose(&many[i],&model)==511-i);assert(NativeHD_FindPreviousPose(&many[i],&otherModel)==-1);}
  assert(NativeHD_FindPreviousPose(&inst,&model)==-1);
  assert(416+720+720==1856 && 1856<=2048);
- puts("PASS actual HD midpoint: LE rotation/native translation, wrapped angles, fresh boost/explosion depth bindings before dispatch, one HUD copy with screenspace flags restored, pose/DB/OT/timer restoration, draw-only weather/cloud/star/heat paths, 512 indexed identities and model changes, pause/level/camera-cut/split-screen guards; EDRAM 1856/2048 tiles");
+ puts("PASS actual HD midpoint: LE rotation/native translation, wrapped angles, fresh boost/explosion depth bindings before dispatch, one HUD copy with screenspace flags restored, pose/DB/OT/timer restoration, draw-only weather/cloud/star/heat paths, 512 indexed identities and model changes, pause/level/camera-cut/split-screen/checkered-flag guards; EDRAM 1856/2048 tiles");
  return 0;
 }
 '''

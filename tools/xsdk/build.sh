@@ -29,6 +29,7 @@ python3 "$ROOT/tools/xsdk/prepare_shaders.py" --out "$OUT/shader-source"
 python3 "$VULKAN4XENON/tools/build_shaders.py" --xost "$XSDK/xenos-toolchain" \
   --glslang "$ROOT/tools/xsdk/glslang.sh" --optimize --output ctr_shaders "$OUT"/shader-source/*
 python3 "$ROOT/tools/xsdk/test_shader_pixels.py" --xsdk "$XSDK" --bundle "$OUT/ctr_shaders.c"
+python3 "$ROOT/tools/xsdk/test_data_fetch.py" --xsdk "$XSDK" --bundle "$OUT/ctr_shaders.c"
 python3 "$ROOT/tools/xsdk/test_present_pixels.py" --xsdk "$XSDK" --bundle "$OUT/ctr_shaders.c"
 python3 "$ROOT/tools/xsdk/test_dither_work.py" --xsdk "$XSDK" --bundle "$OUT/ctr_shaders.c"
 python3 "$ROOT/tools/xsdk/test_vertex_shader.py" --xsdk "$XSDK" --bundle "$OUT/ctr_shaders.c"

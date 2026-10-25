@@ -707,10 +707,11 @@ static void XvColorCheck(void)
     xv.state.rect[2]=xv.state.rect[3]=32;
     // Start with direct color, then repeat every format with both shaders.
     // A failed first draw must not be misidentified as a 4-bit-only failure.
-    const unsigned formats[]={2,0,1,0,1,2,0,1,2,0,1,2,0,0,1,2,0,1,2,0,0,0,0,0,0,1,2,0,1,2};
+    const unsigned formats[]={2,0,1,0,1,2,0,1,2,0,1,2,0,0,1,2,0,1,2,0,0,0,0,0,0,1,2,0,1,2,0,1,0,1};
     const unsigned blendExpected[5][3]={{96,64,32},{80,80,80},{160,160,160},{0,32,96},{88,112,136}};
     for(unsigned check=0;check<sizeof(formats)/sizeof(formats[0]);check++){
-        unsigned format=formats[check],filtering=(check>=6 && check<13) || (check>=16 && check<24) || check>=27;
+        unsigned stress=check>=30;
+        unsigned format=formats[check],filtering=(check>=6 && check<13) || (check>=16 && check<24) || (check>=27 && check<30) || check>=32;
         unsigned modulation=(check>=13 && check<19) || check>=24,blending=check>=19 && check<24;
         unsigned flat=(check>=9 && check<13) || blending;
         xv.offscreen=check<24;
@@ -718,6 +719,23 @@ static void XvColorCheck(void)
         for(unsigned i=0;i<4;i++)xv.pixels[128*1024+i]=modulation?0x3def:colors[i];
         for(unsigned y=0;y<32;y++)for(unsigned x=0;x<32;x++)
             xv.pixels[y*1024+x]=format==0?0x3210:format==1?((x&1)?0x0302:0x0100):modulation?0x3def:colors[x&3];
+        if(stress){
+            /* A skewed, screen-filling surface with varying UVs and a CLUT
+             * at the far right. Every valid texel is orange; guards are blue.
+             * Small aligned fixtures do not exercise these interpolation and
+             * dependent-read conditions. Keep its background blue too. */
+            for(unsigned i=0;i<1024*512;i++)xv.pixels[i]=0x7c00;
+            for(unsigned y=0;y<256;y++)for(unsigned x=0;x<(format?128u:64u);x++)
+                xv.pixels[(256+y)*1024+((960+x)&1023)]=format?0x0101:0x1111;
+            xv.pixels[128*1024+1009]=0x3def;
+            const int slope[6][2]={{-47,-13},{517,23},{29,229},{29,229},{517,23},{551,247}};
+            const unsigned uv[6][2]={{2,1},{253,7},{9,249},{9,249},{253,7},{251,255}};
+            for(unsigned i=0;i<6;i++){
+                vertices[i].x=slope[i][0];vertices[i].y=slope[i][1];vertices[i].u=uv[i][0];vertices[i].v=uv[i][1];
+                vertices[i].page=31;vertices[i].clut=128*64+63;
+            }
+            xv.state.rect[2]=512;xv.state.rect[3]=216;
+        }
         /* Exercise the public texture contract as game splits do. Flat
          * polygons must ignore both a stale tpage and non-white VRAM. */
         NativeRenderer_SetTexture(flat && check!=12?NativeRenderer_GetWhiteTexture():NativeRenderer_GetVRAMTexture(),(TexFormat)format);
@@ -732,18 +750,19 @@ static void XvColorCheck(void)
         xv.vramCPUChanged=1;
         xv.off.clearStencil=1;
         if(!xv.offscreen)xv.main.clearStencil=1;
-        if(blending){
-            NativeRenderer_UpdateVRAM();XvPass(&xv.off);
+        if(blending || stress){
+            NativeRenderer_UpdateVRAM();XvPass(stress?&xv.main:&xv.off);
             VkClearAttachment clear={.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT,.colorAttachment=0,
-                .clearValue.color.float32={64/255.0f,96/255.0f,128/255.0f,0}};
-            VkClearRect rect={.rect={{0,0},{32,32}},.layerCount=1};
+                .clearValue.color.float32={stress?0:64/255.0f,stress?0:96/255.0f,stress?1:128/255.0f,0}};
+            VkClearRect rect={.rect={{0,0},{stress?XV_WIDTH:32,stress?XV_HEIGHT:32}},.layerCount=1};
             vkCmdClearAttachments(xv.command,1,&clear,1,&rect);
         }
         NativeRenderer_UpdateVertexBuffer(vertices,6);XvDrawTriangles(0,2,filtering);
         XvTarget *checked=xv.offscreen?&xv.off:&xv.main;
         XvReadTarget(checked);
-        unsigned bad=0;
-        for(unsigned y=1;y<31;y++)for(unsigned x=1;x<31;x++){
+        unsigned bad=0,total=0;
+        for(unsigned y=stress?96:1;y<(stress?624:31);y++)for(unsigned x=stress?160:1;x<(stress?1120:31);x++){
+            total++;
             unsigned color=colors[x&3],next=colors[(x+1)&3];unsigned char *pixel=xv.staging.map+4*(y*checked->width+x);
             unsigned expected[3]={(color&31)*255/31,((color>>5)&31)*255/31,((color>>10)&31)*255/31};
             if(blending)memcpy(expected,blendExpected[check-19],sizeof(expected));
@@ -753,11 +772,11 @@ static void XvColorCheck(void)
                 expected[channel]=(expected[channel]+((next>>(5*channel))&31)*255/31+1)/2;
             if(abs((int)pixel[0]-(int)expected[0])>1 || abs((int)pixel[1]-(int)expected[1])>1 || abs((int)pixel[2]-(int)expected[2])>1)bad++;
         }
-        unsigned char *sample=xv.staging.map+4*(4*checked->width+4);
+        unsigned char *sample=xv.staging.map+4*((stress?360:4)*checked->width+(stress?640:4));
         const unsigned *expectedSample=blending?blendExpected[check-19]:modulation?(const unsigned[]){247,93,31}:flat?(const unsigned[]){64,128,192}:filtering?(const unsigned[]){128,128,0}:(const unsigned[]){255,0,0};
-        Platform_Log("[vulkan-check] check=%u format=%u filter=%u wrong=%u/900 sample=%u,%u,%u expected=%u,%u,%u kind=%s blend=%u\n",
-            check,format,filtering,bad,sample[0],sample[1],sample[2],expectedSample[0],expectedSample[1],expectedSample[2],
-            blending?"blend":modulation?(xv.offscreen?"modulated":"main-modulated"):check==12?"debug-flat":flat?"flat":"textured",(unsigned)xv.blend);
+        Platform_Log("[vulkan-check] check=%u format=%u filter=%u wrong=%u/%u sample=%u,%u,%u expected=%u,%u,%u kind=%s blend=%u\n",
+            check,format,filtering,bad,total,sample[0],sample[1],sample[2],expectedSample[0],expectedSample[1],expectedSample[2],
+            stress?"raster-stress":blending?"blend":modulation?(xv.offscreen?"modulated":"main-modulated"):check==12?"debug-flat":flat?"flat":"textured",(unsigned)xv.blend);
     }
     g_dbg_texturelessMode=0;xv.blend=BM_NONE;
     memset(xv.pixels,0,sizeof(xv.pixels));xv.vramCPUChanged=1;xv.vramGPUChanged=0;

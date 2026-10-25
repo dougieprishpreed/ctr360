@@ -63,7 +63,7 @@ static void XvDrawTriangles(int first,int n,int filtering){assert(first==0 && n=
 static void XvPass(XvTarget *t){}
 void vkCmdClearAttachments(VkCommandBuffer c,uint32_t n,const VkClearAttachment *a,uint32_t nr,const VkClearRect *r){}
 void vkCmdClearColorImage(VkCommandBuffer cb,VkImage image,VkImageLayout layout,const VkClearColorValue *color,uint32_t n,const VkImageSubresourceRange *range){
- assert(copies==30 && layout==VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && n==1);
+ assert(copies==34 && layout==VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && n==1);
  assert(image==(VkImage)(uintptr_t)(clears?&xv.off:&xv.main));
  assert(range->aspectMask==VK_IMAGE_ASPECT_COLOR_BIT && range->baseMipLevel==0 && range->levelCount==1 && range->baseArrayLayer==0 && range->layerCount==1);
  for(unsigned i=0;i<4;i++)assert(color->float32[i]==0);clears++;
@@ -71,9 +71,9 @@ void vkCmdClearColorImage(VkCommandBuffer cb,VkImage image,VkImageLayout layout,
 VkResult vkInvalidateMappedMemoryRanges(VkDevice d,uint32_t n,const VkMappedMemoryRange *r){assert(n==1 && r->size==VK_WHOLE_SIZE);return VK_SUCCESS;}
 static void Platform_Log(const char *format,...){
  va_list ap;va_start(ap,format);unsigned check=va_arg(ap,unsigned);(void)va_arg(ap,unsigned);(void)va_arg(ap,unsigned);
- unsigned bad=va_arg(ap,unsigned),r=va_arg(ap,unsigned),g=va_arg(ap,unsigned),b=va_arg(ap,unsigned);
+ unsigned bad=va_arg(ap,unsigned),total=va_arg(ap,unsigned),r=va_arg(ap,unsigned),g=va_arg(ap,unsigned),b=va_arg(ap,unsigned);
  unsigned er=va_arg(ap,unsigned),eg=va_arg(ap,unsigned),eb=va_arg(ap,unsigned);
- assert(check==logs++ && !bad && r==er && g==eg && b==eb);va_end(ap);
+ assert(check==logs++ && !bad && total==(check>=30?506880:900) && r==er && g==eg && b==eb);va_end(ap);
 }
 '''+validator+r'''
 void vkCmdCopyImageToBuffer(VkCommandBuffer cb,VkImage image,VkImageLayout layout,VkBuffer buffer,uint32_t n,const VkBufferImageCopy *region){
@@ -85,7 +85,7 @@ void vkCmdCopyImageToBuffer(VkCommandBuffer cb,VkImage image,VkImageLayout layou
  memset(xv.staging.map,0,bytes);
  const unsigned colors[4][3]={{255,0,0},{0,255,0},{0,0,255},{255,255,255}};
  const unsigned blends[5][3]={{96,64,32},{80,80,80},{160,160,160},{0,32,96},{88,112,136}};
- for(unsigned y=0;y<32;y++)for(unsigned x=0;x<32;x++){
+ for(unsigned y=0;y<(copies>=30?target->height:32);y++)for(unsigned x=0;x<(copies>=30?target->width:32);x++){
   unsigned rgb[3];
   if(copies<9){for(unsigned ch=0;ch<3;ch++)rgb[ch]=copies<6?colors[x&3][ch]:(colors[x&3][ch]+colors[(x+1)&3][ch]+1)/2;}
   else if(copies<13){rgb[0]=64;rgb[1]=128;rgb[2]=192;}
@@ -100,10 +100,10 @@ int main(void){
  xv.main.width=1280;xv.main.height=720;xv.off.width=1024;xv.off.height=512;
  xv.main.image=(VkImage)(uintptr_t)&xv.main;xv.off.image=(VkImage)(uintptr_t)&xv.off;
  xv.staging.size=ALLOCATION_BYTES;xv.staging.map=malloc(xv.staging.size);assert(xv.staging.map);
- XvColorCheck();assert(logs==30 && copies==30 && mainCopies==6 && offCopies==24);
+ XvColorCheck();assert(logs==34 && copies==34 && mainCopies==10 && offCopies==24);
  assert(clears==2 && xv.main.clearStencil && xv.off.clearStencil);
  assert(xv.mainValid==0 && xv.mainResolved==0);free(xv.staging.map);
- puts("PASS: all 30 actual boot checks; upstream whole-level validator, main/VRAM staging capacity and per-target readback pitch");
+ puts("PASS: all 34 actual boot checks including dense raster scan; whole-level validator, staging capacity and per-target pitch");
 }
 '''
 c=c.replace('ALLOCATION_BYTES',allocate)

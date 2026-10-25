@@ -119,7 +119,7 @@ def main():
                     vram[(256+y)*1024 + 64+x] = ((x*733 + y*97) & 65535)
             for uv in ((0.5, 0.5), (1.25, 0.75), (2.5, 0.125), (255.75, 255.5), (-0.25, -0.5)):
                 for filtering in range(2):
-                    for flags in ((0, 0, 0, 0), (1, 0, 0, 0), (2, 0, 1, 0), (0, 1, 0, 0)):
+                    for flags in ((p,m,o,0) for p in range(3) for m in range(2) for o in range(2)):
                         check(fmt*2 + filtering, uv, flags)
         for flags in ((0, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0)):
             check(6, (4.5, 4.5), flags)

@@ -4,7 +4,11 @@ layout(set=0,binding=1) uniform sampler2D image;
 layout(location=0) in vec2 uv;
 layout(location=0) out vec4 result;
 void main() {
+    #if XV_MODE == 2
+    vec4 c=textureLod(image,uv,0.0);
+    #else
     vec4 c=texture(image,uv);
+    #endif
     #if XV_MODE == 3
     {
         vec2 p=vec2(1.0/1280.0,1.0/720.0);

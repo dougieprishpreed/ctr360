@@ -8,7 +8,7 @@ layout(location=0) out vec4 result;
 vec2 bytes(vec2 pos) {
     // Callers supply integral word addresses. The VRAM sampler wraps the
     // 1024x512 image, including CLUTs/pages that cross its physical edges.
-    return floor(texture(vram,(pos+0.5)/vec2(1024,512)).rg*255.0+0.5);
+    return floor(textureLod(vram,(pos+0.5)/vec2(1024,512),0.0).rg*255.0+0.5);
 }
 float word(vec2 pos) {
     vec2 rg=bytes(pos);
@@ -57,7 +57,8 @@ void main() {
     vec2 p=mod(floor(tc.xy),256.0);
     float nearest=textureWord(p,pg);
     float stp=step(32768.0,nearest);
-    if(nearest<0.5 || (s.flags.x>0.5 && s.flags.x<1.5 && stp>0.5) || (s.flags.x>1.5 && stp<0.5)) discard;
+    // Pass is exactly 0 (all), 1 (opaque subset), or 2 (STP subset).
+    if(nearest<0.5 || s.flags.x==2.0-stp) discard;
 #endif
     #if XV_FORMAT == 3
     c=vec4(1);
@@ -89,8 +90,8 @@ void main() {
     // PSX coverage follows the nearest texel, tested above. A tiny filtered
     // weight at a transparent edge must not punch an extra hole in geometry.
     #if XV_FORMAT == 3
-    result=vec4(c.rgb,s.flags.y>0.5?1.0:0.0);
+    result=vec4(c.rgb,s.flags.y);
 #else
-    result=vec4(c.rgb,(s.flags.y>0.5 || (s.flags.z>0.5 && stp>0.5))?1.0:0.0);
+    result=vec4(c.rgb,min(1.0,s.flags.y+s.flags.z*stp));
 #endif
 }

@@ -17,7 +17,7 @@ c=r'''
 enum {XV_WIDTH=1280,XV_HEIGHT=720};
 typedef struct {int id;} XvTarget;
 static struct {VkDevice device;VkSwapchainKHR swapchain;VkQueue queue;VkFence fence;XvTarget main,vram,swap[3];int mainResolved;} xv;
-static struct {unsigned submits,uploads,reads,draws,passes,shaderDraws[7],quads[4];unsigned submitMS,waitMS,frameWaitMS,acquireMS,presentMS;unsigned blendDraws[5],uiDraws,feedbackRequests,midpointFeedbackSkips;} xvCost;
+static struct {unsigned submits,uploads,reads,draws,passes,shaderDraws[7],quads[4];unsigned submitMS,waitMS,frameWaitMS,acquireMS,presentMS;unsigned blendDraws[5],uiDraws,feedbackRequests,midpointFeedbackSkips,skippedSTPPasses;} xvCost;
 static int xvEdgeAA=1;
 static unsigned phase,submits,quads,modeSeen;
 #define XV_CALL(x) assert((x)==VK_SUCCESS)

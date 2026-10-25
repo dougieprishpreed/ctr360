@@ -6,49 +6,56 @@ layout(location=1) in vec4 tc;
 layout(location=2) in vec4 page;
 layout(location=0) out vec4 result;
 vec2 bytes(vec2 pos) {
-    return floor(texture(vram,(mod(floor(pos),vec2(1024,512))+0.5)/vec2(1024,512)).rg*255.0+0.5);
+    // Callers supply integral word addresses. The VRAM sampler wraps the
+    // 1024x512 image, including CLUTs/pages that cross its physical edges.
+    return floor(texture(vram,(pos+0.5)/vec2(1024,512)).rg*255.0+0.5);
 }
 float word(vec2 pos) {
     vec2 rg=bytes(pos);
     return rg.x+rg.y*256.0;
 }
 vec4 unpackColor(float w) {
-    return vec4(mod(w,32.0),mod(floor(w/32.0),32.0),mod(floor(w/1024.0),32.0),floor(w/32768.0))/vec4(31,31,31,1);
+    vec4 shifted=floor(w/vec4(1,32,1024,32768));
+    return vec4(shifted.xyz-shifted.yzw*32.0,shifted.w)/vec4(31,31,31,1);
 }
-float textureWord(vec2 uv) {
-    uv=mod(floor(uv),256.0);
+float textureWord(vec2 uv,vec4 pg) {
+    // UV is already integral and wrapped to this 256x256 page.
     float w;
     #if XV_FORMAT == 0
     {
-        vec2 rg=bytes(floor(page.xy+0.5)+vec2(floor(uv.x*0.25),uv.y));
-        float component=mod(uv.x,4.0);
+        float packedX=floor(uv.x*0.25);
+        vec2 rg=bytes(pg.xy+vec2(packedX,uv.y));
+        float component=uv.x-packedX*4.0;
         // Select the byte, then its nibble, as in the working XDK renderer.
         // Arithmetic stays in 0..255; no variable full-word shift multiplier.
         float b=mix(rg.x,rg.y,step(2.0,component));
         float high=floor(b*0.0625);
         float index=mix(b-high*16.0,high,mod(component,2.0));
-        w=word(floor(page.zw+0.5)+vec2(index,0));
+        w=word(pg.zw+vec2(index,0));
     }
 #elif XV_FORMAT == 1
     {
-        vec2 rg=bytes(floor(page.xy+0.5)+vec2(floor(uv.x*0.5),uv.y));
-        w=word(floor(page.zw+0.5)+vec2(mix(rg.x,rg.y,mod(uv.x,2.0)),0));
+        float packedX=floor(uv.x*0.5);
+        vec2 rg=bytes(pg.xy+vec2(packedX,uv.y));
+        w=word(pg.zw+vec2(mix(rg.x,rg.y,uv.x-packedX*2.0),0));
     }
 #else
-    w=word(floor(page.xy+0.5)+uv);
+    w=word(pg.xy+uv);
 #endif
     return w;
 }
-vec4 samplePSX(vec2 uv) {
-    float w=textureWord(uv);
+vec4 samplePSX(vec2 uv,vec4 pg) {
+    float w=textureWord(uv,pg);
     vec4 c=unpackColor(w);
     float visible=w>0.0?1.0:0.0;
-    return vec4(c.rgb*visible,visible);
+    return vec4(c.rgb,visible);
 }
 void main() {
     vec4 c;
 #if XV_FORMAT != 3
-    float nearest=textureWord(tc.xy);
+    vec4 pg=floor(page+0.5);
+    vec2 p=mod(floor(tc.xy),256.0);
+    float nearest=textureWord(p,pg);
     float stp=step(32768.0,nearest);
     if(nearest<0.5 || (s.flags.x>0.5 && s.flags.x<1.5 && stp>0.5) || (s.flags.x>1.5 && stp<0.5)) discard;
 #endif
@@ -56,11 +63,12 @@ void main() {
     c=vec4(1);
 #elif XV_FILTER
     {
-        vec2 uv=tc.xy; vec2 f=fract(uv);vec2 p=floor(uv);
-        // textureWord floors UV: the nearest sample is exactly the top-left
-        // filtering tap. Its visibility/STP decision above still applies.
-        c=mix(mix(vec4(unpackColor(nearest).rgb,1),samplePSX(p+vec2(1,0)),f.x),
-              mix(samplePSX(p+vec2(0,1)),samplePSX(p+vec2(1,1)),f.x),f.y);
+        vec2 f=fract(tc.xy);
+        vec2 next=mix(p+1.0,vec2(0),step(vec2(255),p));
+        // Share address rounding/wrapping across all four taps. Neighbor
+        // coordinates still wrap at the PSX page edge before packed fetches.
+        c=mix(mix(vec4(unpackColor(nearest).rgb,1),samplePSX(vec2(next.x,p.y),pg),f.x),
+              mix(samplePSX(vec2(p.x,next.y),pg),samplePSX(next,pg),f.x),f.y);
         c.rgb/=max(c.a,0.0001);
 
     }

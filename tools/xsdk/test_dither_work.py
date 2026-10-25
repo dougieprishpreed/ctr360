@@ -24,10 +24,12 @@ def work(bundle,name,offscreen,legacy=False):
  return count[0],result.exports[0]
 
 current=a.bundle.read_text();baseline=a.baseline.read_text() if a.baseline else None
+texture_budgets=(55,140,50,120,40,90,3)
 for shader in range(7):
  name='psx_%d_frag'%shader
  main,main_pixel=work(current,name,False);off,off_pixel=work(current,'psx_%d_frag'%(shader+7),True)
  assert main<off,(name,'uniform arm did not skip ALU instructions',main,off)
+ assert main<=texture_budgets[shader],(name,'packed texture ALU regression',main,texture_budgets[shader])
  if baseline:
   old_main,old_pixel=work(baseline,name,False,True);old_off,old_off_pixel=work(baseline,name,True,True)
   assert max(abs(x-y) for x,y in zip(main_pixel,old_pixel))<0.0001

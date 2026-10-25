@@ -17,6 +17,7 @@ def main():
     args.out.mkdir(parents=True, exist_ok=True)
     root = Path(__file__).resolve().parents[2]
     source = (root/'platform/xsdk/native_xsdk_video.c').read_text()
+    palette = source[source.index('/* CPU palette summaries'):source.index('static void XvCheck(')]
     setters = source[source.index('void NativeRenderer_SetTexture('):source.index('void NativeRenderer_UpdateVertexBuffer(')]
     draw = source[source.index('static void XvDrawTriangles('):source.index('static int XvValidRect(')]
     harness = r'''
@@ -26,6 +27,8 @@ def main():
 #include <stdio.h>
 enum {XV_WIDTH=1280, XV_HEIGHT=720};
 typedef unsigned TextureID;
+typedef uint16_t u16;
+typedef struct {int16_t clut;} GrVertex;
 typedef enum {TF_4_BIT,TF_8_BIT,TF_16_BIT,TF_32_BIT_RGBA} TexFormat;
 typedef enum {BM_NONE,BM_AVERAGE,BM_ADD,BM_SUBTRACT,BM_ADD_QUATER_SOURCE} BlendMode;
 typedef struct {int x,y,w,h;} RECT16;
@@ -37,8 +40,9 @@ static struct {
  unsigned vertexBase,vertexCount; int offscreen,ui,clipEnabled,drawPrim,mainValid;
  RECT16 offRect; VkRect2D scissor; XvUniform state;
  TextureID texture; TexFormat format; BlendMode blend;
+ const GrVertex *sourceVertices;u16 pixels[1024*512];
 } xv;
-static struct {unsigned draws,shaderDraws[7],blendDraws[5],uiDraws;} xvCost;
+static struct {unsigned draws,shaderDraws[7],blendDraws[5],uiDraws,skippedSTPPasses;} xvCost;
 static int g_dbg_texturelessMode,g_cfg_bilinearFiltering=1;
 static unsigned selected,stencil,bound,draws,firstSeen,countSeen;
 static XvTarget *targetSeen;
@@ -55,7 +59,13 @@ void vkCmdSetScissor(VkCommandBuffer c,uint32_t f,uint32_t n,const VkRect2D *v){
 void vkCmdBindPipeline(VkCommandBuffer c,VkPipelineBindPoint p,VkPipeline v){bound=(unsigned)(uintptr_t)v-1;}
 void vkCmdBindVertexBuffers(VkCommandBuffer c,uint32_t f,uint32_t n,const VkBuffer *b,const VkDeviceSize *o){assert(*o==xv.vertexBase);}
 void vkCmdDraw(VkCommandBuffer c,uint32_t n,uint32_t i,uint32_t f,uint32_t fi){draws++;firstSeen=f;countSeen=n;assert(i==1 && fi==0);}
-'''+setters+draw+r'''
+'''+palette+setters+draw+r'''
+static void twoPasses(unsigned expected){
+ unsigned before=draws;
+ xv.state.flags[0]=1;XvDrawTriangles(0,2,1);
+ xv.state.flags[0]=2;XvDrawTriangles(0,2,1);
+ assert(draws-before==expected);
+}
 static void check(TextureID texture,TexFormat format,int filtering,int expected){
  NativeRenderer_SetTexture(texture,format);
  XvDrawTriangles(3,2,filtering);
@@ -85,9 +95,36 @@ int main(void){
  unsigned before=draws;
  XvDrawTriangles(-1,2,1);XvDrawTriangles(0,0,1);XvDrawTriangles(10,2,1);XvDrawTriangles(13,1,1);
  assert(draws==before);
+ GrVertex vertices[6];for(unsigned i=0;i<6;i++)vertices[i].clut=511*64+63;
+ xv.vertexCount=6;xv.sourceVertices=vertices;xv.offscreen=xv.ui=0;
+ for(unsigned fmt=0;fmt<2;fmt++)for(unsigned kind=0;kind<4;kind++){
+  xv.format=fmt;memset(xv.pixels,0,sizeof(xv.pixels));
+  for(unsigned i=0;i<(fmt?256:16);i++)xv.pixels[511*1024+((1008+i)&1023)]=kind==0?31:kind==1?32768:kind==2?(i&1?31:32768):0;
+  XvPaletteReset();twoPasses(kind<2?1:2);twoPasses(kind<2?1:2);
+  for(unsigned i=0;i<6;i++)vertices[i].clut^=32768;
+  twoPasses(kind<2?1:2);
+  for(unsigned i=0;i<6;i++)vertices[i].clut^=32768;
+  // An unrelated framebuffer rectangle must not disable the cached summary.
+  XvPaletteWritten(0,511,16,1);twoPasses(fmt?2:kind<2?1:2);
+  XvPaletteWritten(1008,511,1,1);twoPasses(2);
+  XvPaletteReset();twoPasses(kind<2?1:2);
+  // Different CLUTs in one call, direct color, and the debug/white paths
+  // cannot use this proof even when the first vertex's palette is uniform.
+  vertices[5].clut--;twoPasses(2);vertices[5].clut++;
+  xv.format=TF_16_BIT;twoPasses(2);xv.format=fmt;
+  g_dbg_texturelessMode=1;twoPasses(2);g_dbg_texturelessMode=0;
+  xv.texture=NativeRenderer_GetWhiteTexture();twoPasses(2);xv.texture=NativeRenderer_GetVRAMTexture();
+ }
+ // CPU changes/readback start a new generation; stale cached STP is rejected.
+ xv.format=TF_4_BIT;xv.pixels[511*1024+1008]=31;XvPaletteReset();twoPasses(1);
+ xv.pixels[511*1024+1008]=32768;XvPaletteReset();twoPasses(1);
+ assert(XvTexturePassNeeded(0,2)); // Last pass (STP) now has a visible texel.
+ xvPalette.generation=~0u;XvPaletteReset();assert(xvPalette.generation==1);twoPasses(1);
  printf("PASS: %u actual draw-routing cases; flat/textured/debug, inherited tpage, filter, UI/offscreen, stencil, bounds\n",cases);
+ puts("PASS: actual STP draw skipping; opaque/STP/mixed/zero palettes, 4/8-bit wrap, GPU overlap, CPU invalidation, mixed CLUTs and generation rollover");
 }
 '''
+    harness=harness.replace('#include <stdio.h>','#include <stdio.h>\n#include <string.h>')
     header = '-I'+str(args.vulkan/'third_party/vulkan-headers/include')
     def run(text, name):
         c = args.out/(name+'.c')
@@ -105,6 +142,11 @@ int main(void){
     negative = run(harness.replace(predicate, ''), 'draw-routing-negative')
     assert negative.returncode, 'negative control failed to detect ignored texture ID'
     print('PASS: previous ignored-white-texture regression rejected')
+    invalidation = 'if(xvPalette.gpuWritten[y*64+((x/16+i)&63)])return 0;'
+    assert invalidation in harness
+    negative = run(harness.replace(invalidation,'(void)0;'), 'palette-invalidation-negative')
+    assert negative.returncode, 'negative control missed stale GPU-written palette'
+    print('PASS: using stale CPU palettes after a GPU write rejected')
 
 
 if __name__ == '__main__':

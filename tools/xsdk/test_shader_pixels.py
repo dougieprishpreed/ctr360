@@ -45,10 +45,10 @@ def main():
     def reference_word(fmt, x, y):
         x, y = math.floor(x) % 256, math.floor(y) % 256
         if fmt == 2:
-            return read(64 + x, 256 + y)
-        packed = read(64 + (x // (4 if fmt == 0 else 2)), 256 + y)
+            return read(page[0] + x, page[1] + y)
+        packed = read(page[0] + (x // (4 if fmt == 0 else 2)), page[1] + y)
         index = (packed >> ((x % (4 if fmt == 0 else 2)) * (4 if fmt == 0 else 8))) & (15 if fmt == 0 else 255)
-        return read(16 + index, 480)
+        return read(page[2] + index, page[3])
 
     def color(word):
         return [(word >> shift & 31) / 31 for shift in (0, 5, 10)]
@@ -129,6 +129,20 @@ def main():
                     for y in range(4):
                         for rgba in ((0.5,0.25,0.75,1),(2,1,0.5,1)):
                             check(shader,(2.5,0.5),rgba=rgba,dither=dither,dc=(x,y))
+        # Physical VRAM wrap is now done by the repeat sampler. UV wrapping
+        # remains local to the 256x256 page, before packed-index addressing.
+        vram[:] = [(i*1237+31)&65535 for i in range(len(vram))]
+        for page in ([960,256,1008,511],[960,512,1008,511],[0,0,0,0]):
+            for shader in range(6):
+                for uv in ((0.25,0.75),(255.75,255.5),(-0.25,-0.5),(256.5,256.5)):
+                    for flags in ((0,0,1,0),(1,1,0,0),(2,0,1,0)):
+                        check(shader,uv,flags)
+        page=[64,256,16,480]
+        # Color carries at every five-bit boundary, including STP black.
+        for word in sorted({0,32768,65535} | {max(0,min(65535,(n<<shift)+delta))
+                          for shift in (5,10,15) for n in range(33) for delta in (-1,0,1)}):
+            vram[256*1024+64]=word
+            check(4,(0.25,0.75),(0,0,1,0))
     print('PASS: %d actual bundled pixel-shader cases: all packed lanes, palette/STP, transparency, filtering, UV wrap, flat colors' % count)
 
 

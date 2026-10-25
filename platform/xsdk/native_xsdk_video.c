@@ -37,10 +37,11 @@ static struct {
     XvTarget swap[3],main,off,vram;
     VkRenderPass passes[4];VkCommandPool pool;VkCommandBuffer command;VkFence fence;
     VkDescriptorSetLayout setLayout;VkPipelineLayout pipelineLayout;VkDescriptorPool descriptors;
-    VkDescriptorSet sets[4];VkSampler sampler,linearSampler;
+    VkDescriptorSet sets[4];VkSampler sampler,linearSampler,vramSampler;
     VkShaderModule shaders[20];VkPipeline pipelines[3][18][5][3];
     XvBuffer vertices,uniforms,staging;
     unsigned vertexCursor,vertexBase,vertexCount,uniformCursor,uniformAlignment;
+    const GrVertex *sourceVertices;
     XvTarget *target;int recording,inPass;
     XvUniform state;VkRect2D scissor;int clipEnabled,ui,offscreen,drawPrim;
     RECT16 offRect;BlendMode blend;TexFormat format;TextureID texture;
@@ -53,9 +54,54 @@ static void XvColorCheck(void);
 static struct {
     unsigned submits,uploads,reads,draws,passes,shaderDraws[7],quads[4];
     unsigned submitMS,waitMS,frameWaitMS,acquireMS,presentMS;
-    unsigned blendDraws[5],uiDraws,feedbackRequests,midpointFeedbackSkips;
+    unsigned blendDraws[5],uiDraws,feedbackRequests,midpointFeedbackSkips,skippedSTPPasses;
 } xvCost;
 int g_dbg_wireframeMode=0,g_dbg_texturelessMode=0,g_cfg_bilinearFiltering=1;
+/* CPU palette summaries are valid only while no GPU write overlaps them.
+ * Track 16-word blocks: framebuffer writes must not invalidate an unrelated
+ * CLUT to their right on the same row. Unknown/mixed palettes keep both draws. */
+static struct {
+    unsigned generation;
+    unsigned char gpuWritten[512*64];
+    struct {unsigned generation,key,kind;} cache[64];
+} xvPalette;
+static void XvPaletteReset(void)
+{
+    memset(xvPalette.gpuWritten,0,sizeof(xvPalette.gpuWritten));
+    if(++xvPalette.generation==0){memset(xvPalette.cache,0,sizeof(xvPalette.cache));xvPalette.generation=1;}
+}
+static void XvPaletteWritten(int x,int y,int w,int h)
+{
+    unsigned left=(unsigned)x/16,right=((unsigned)x+w+15)/16;
+    for(int row=y;row<y+h;row++)memset(xvPalette.gpuWritten+row*64+left,1,right-left);
+}
+static unsigned XvPaletteKind(unsigned clut,unsigned format)
+{
+    unsigned x=(clut&63)*16,y=(clut>>6)&511,blocks=format==TF_4_BIT?1:16;
+    for(unsigned i=0;i<blocks;i++)if(xvPalette.gpuWritten[y*64+((x/16+i)&63)])return 0;
+    unsigned key=clut|(format<<15),slot=(clut^(clut>>6)^(format*17))&63;
+    if(xvPalette.cache[slot].generation==xvPalette.generation && xvPalette.cache[slot].key==key)
+        return xvPalette.cache[slot].kind;
+    unsigned kind=0;
+    for(unsigned i=0;i<blocks*16;i++){
+        unsigned word=xv.pixels[y*1024+((x+i)&1023)];
+        if(word)kind|=word&32768?2:1;
+        if(kind==3)break;
+    }
+    xvPalette.cache[slot].generation=xvPalette.generation;xvPalette.cache[slot].key=key;xvPalette.cache[slot].kind=kind;
+    return kind;
+}
+static int XvTexturePassNeeded(int first,int triangles)
+{
+    if(!xv.sourceVertices || xv.format>TF_8_BIT || xv.texture!=1 || g_dbg_texturelessMode ||
+       (xv.state.flags[0]!=1 && xv.state.flags[0]!=2))return 1;
+    unsigned clut=(u16)xv.sourceVertices[first].clut&32767;
+    // DrawSplit keeps STP draws primitive-sized. Be conservative for any
+    // caller that combines several CLUTs in one draw.
+    for(int i=1;i<triangles*3;i++)if(((u16)xv.sourceVertices[first+i].clut&32767)!=clut)return 1;
+    unsigned kind=XvPaletteKind(clut,xv.format);
+    return !((xv.state.flags[0]==1 && kind==2) || (xv.state.flags[0]==2 && kind==1));
+}
 static void XvCheck(VkResult result,const char *operation)
 {
     if(result!=VK_SUCCESS) { Platform_LogError("[vulkan] %s failed: %d\n",operation,(int)result);Platform_Exit(1); }
@@ -255,10 +301,12 @@ static void XvSyncCPU(void)
     XvReadTarget(&xv.vram);
     for(unsigned i=0;i<1024*512;i++)xv.pixels[i]=(u16)(xv.staging.map[4*i]|xv.staging.map[4*i+1]<<8);
     xv.vramGPUChanged=0;
+    XvPaletteReset();
 }
 void NativeRenderer_UpdateVRAM(void)
 {
     if(!xv.vramCPUChanged)return;
+    XvPaletteReset();
     xvCost.uploads++;
     /* A previous submit may still read the staging buffer. Never overwrite it
      * until the fence; CPU writes merge with GPU-produced VRAM in Copy/Clear. */
@@ -359,12 +407,15 @@ int NativeRenderer_InitialiseRender(char *name,int width,int height,int fullscre
     XV_CALL(vkCreateSampler(xv.device,&sampler,NULL,&xv.sampler));
     sampler.minFilter=VK_FILTER_LINEAR;sampler.magFilter=VK_FILTER_LINEAR;
     XV_CALL(vkCreateSampler(xv.device,&sampler,NULL,&xv.linearSampler));
+    sampler.minFilter=VK_FILTER_NEAREST;sampler.magFilter=VK_FILTER_NEAREST;
+    sampler.addressModeU=sampler.addressModeV=VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    XV_CALL(vkCreateSampler(xv.device,&sampler,NULL,&xv.vramSampler));
     XvTarget *textures[]={&xv.vram,&xv.main,&xv.off,&xv.main};
     for(unsigned i=0;i<4;i++){
         VkDescriptorSetAllocateInfo alloc={.sType=VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,.descriptorPool=xv.descriptors,.descriptorSetCount=1,.pSetLayouts=&xv.setLayout};
         XV_CALL(vkAllocateDescriptorSets(xv.device,&alloc,&xv.sets[i]));
         VkDescriptorBufferInfo buffer={xv.uniforms.buffer,0,sizeof(XvUniform)};
-        VkDescriptorImageInfo image={i==3?xv.linearSampler:xv.sampler,textures[i]->view,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkDescriptorImageInfo image={i==0?xv.vramSampler:i==3?xv.linearSampler:xv.sampler,textures[i]->view,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkWriteDescriptorSet writes[]={
             {.sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,.dstSet=xv.sets[i],.dstBinding=0,.descriptorCount=1,.descriptorType=VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,.pBufferInfo=&buffer},
             {.sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,.dstSet=xv.sets[i],.dstBinding=1,.descriptorCount=1,.descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,.pImageInfo=&image}};
@@ -437,13 +488,18 @@ void NativeRenderer_UpdateVertexBuffer(const GrVertex *vertices,int count)
     size_t bytes=count*sizeof(XvVertex);
     if(xv.vertexCursor+bytes>XV_VERTEX_BYTES){XvSubmit();xv.vertexCursor=0;}
     xv.vertexBase=xv.vertexCursor;xv.vertexCount=count;
+    // Draw calls consume this upload synchronously before the next upload.
+    // Read CLUT metadata from cached CPU vertices, never GPU-mapped memory.
+    xv.sourceVertices=vertices;
     XvVertex *out=(XvVertex *)(xv.vertices.map+xv.vertexCursor);xv.vertexCursor+=bytes;
     memcpy(out,vertices,bytes);
 }
 static void XvDrawTriangles(int first,int triangles,int filtering)
 {
     if(first<0 || triangles<=0 || (unsigned)first>xv.vertexCount || (unsigned)triangles>(xv.vertexCount-first)/3)return;
-    NativeRenderer_UpdateVRAM();XvLayout(&xv.vram,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    NativeRenderer_UpdateVRAM();
+    if(!XvTexturePassNeeded(first,triangles)){xvCost.skippedSTPPasses++;return;}
+    XvLayout(&xv.vram,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     XvTarget *target=xv.offscreen?&xv.off:&xv.main;XvPass(target);
     unsigned width=xv.offscreen?xv.offRect.w:XV_WIDTH,height=xv.offscreen?xv.offRect.h:XV_HEIGHT;
     XvReserveUniform();
@@ -528,6 +584,7 @@ void NativeRenderer_ClearVRAM(int x,int y,int w,int h,u8 r,u8 g,u8 b)
         .clearValue.color.float32={(color&255)/255.0f,(color>>8)/255.0f,0,1}};
     VkClearRect rect={.rect={{x,y},{w,h}},.layerCount=1};vkCmdClearAttachments(xv.command,1,&clear,1,&rect);
     xv.vramGPUChanged=1;
+    XvPaletteWritten(x,y,w,h);
 }
 
 void NativeRenderer_Clear(int x,int y,int w,int h,u8 r,u8 g,u8 b)
@@ -550,6 +607,7 @@ static void XvPack(XvTarget *target,int x,int y,int w,int h)
     NativeRenderer_UpdateVRAM();
     float sw=target==&xv.off?(float)w/target->width:1,sh=target==&xv.off?(float)h/target->height:1;
     XvQuad(&xv.vram,target,1,x,y,w,h,0,0,sw,sh);XvLayout(&xv.vram,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);xv.vramGPUChanged=1;
+    XvPaletteWritten(x,y,w,h);
 }
 void NativeRenderer_SetOffscreenState(const RECT16 *rect,int enabled)
 {
@@ -602,9 +660,9 @@ void NativeRenderer_PresentVRAMRect(int x,int y,int w,int h)
             xvCost.shaderDraws[0],xvCost.shaderDraws[1],xvCost.shaderDraws[2],xvCost.shaderDraws[3],
             xvCost.shaderDraws[4],xvCost.shaderDraws[5],xvCost.shaderDraws[6],
             xvCost.quads[0],xvCost.quads[1],xvCost.quads[2],xvCost.quads[3]);
-        Platform_Log("[vulkan-work] blend-draws=%u,%u,%u,%u,%u ui=%u feedback=%u midpoint-feedback-skips=%u\n",
+        Platform_Log("[vulkan-work] blend-draws=%u,%u,%u,%u,%u ui=%u feedback=%u midpoint-feedback-skips=%u stp-pass-skips=%u\n",
             xvCost.blendDraws[0],xvCost.blendDraws[1],xvCost.blendDraws[2],xvCost.blendDraws[3],xvCost.blendDraws[4],
-            xvCost.uiDraws,xvCost.feedbackRequests,xvCost.midpointFeedbackSkips);
+            xvCost.uiDraws,xvCost.feedbackRequests,xvCost.midpointFeedbackSkips,xvCost.skippedSTPPasses);
         frames=0;lastReport=now;memset(&xvCost,0,sizeof(xvCost));
     }
 }
@@ -732,6 +790,7 @@ void NativeRenderer_Shutdown(void)
     XvBuffer *buffers[]={&xv.vertices,&xv.uniforms,&xv.staging};
     for(unsigned i=0;i<3;i++){vkUnmapMemory(xv.device,buffers[i]->memory);vkDestroyBuffer(xv.device,buffers[i]->buffer,NULL);vkFreeMemory(xv.device,buffers[i]->memory,NULL);}
     vkDestroyDescriptorPool(xv.device,xv.descriptors,NULL);vkDestroySampler(xv.device,xv.sampler,NULL);vkDestroySampler(xv.device,xv.linearSampler,NULL);
+    vkDestroySampler(xv.device,xv.vramSampler,NULL);
     vkDestroyPipelineLayout(xv.device,xv.pipelineLayout,NULL);vkDestroyDescriptorSetLayout(xv.device,xv.setLayout,NULL);
     for(unsigned i=0;i<4;i++)vkDestroyRenderPass(xv.device,xv.passes[i],NULL);
     vkDestroyFence(xv.device,xv.fence,NULL);vkDestroyCommandPool(xv.device,xv.pool,NULL);

@@ -54,7 +54,12 @@ void main() {
     vec4 c;
 #if XV_FORMAT != 3
     vec4 pg=floor(page+0.5);
-    vec2 p=mod(floor(tc.xy),256.0);
+    // The XDK path biases data sampling away from integer boundaries. Keep
+    // interpolation roundoff below a constant UV from selecting its previous
+    // texel/transparent mask. Use one consistent, exactly representable bias
+    // for coverage and filtering, rather than a fifth nearest fetch.
+    vec2 uv=tc.xy+vec2(1.0/4096.0);
+    vec2 p=mod(floor(uv),256.0);
     float nearest=textureWord(p,pg);
     float stp=step(32768.0,nearest);
     // Pass is exactly 0 (all), 1 (opaque subset), or 2 (STP subset).
@@ -64,7 +69,7 @@ void main() {
     c=vec4(1);
 #elif XV_FILTER
     {
-        vec2 f=fract(tc.xy);
+        vec2 f=fract(uv);
         vec2 next=mix(p+1.0,vec2(0),step(vec2(255),p));
         // Share address rounding/wrapping across all four taps. Neighbor
         // coordinates still wrap at the PSX page edge before packed fetches.

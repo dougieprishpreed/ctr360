@@ -69,15 +69,16 @@ def main():
         dc = uv if dc is None else dc
         got = simulate.run(blob, registers={0: [*rgba[:3],dc[1]], 1: [*uv,dc[0],dither],
                                            2: page}, constants=constants, texture_fetch=sample)
-        nearest = reference_word(shader // 2, *uv) if shader < 6 else 32767
+        sample_uv=(uv[0]+1/4096,uv[1]+1/4096)
+        nearest = reference_word(shader // 2, *sample_uv) if shader < 6 else 32767
         stp = bool(nearest & 32768)
         killed = shader < 6 and (nearest == 0 or (flags[0] == 1 and stp) or (flags[0] == 2 and not stp))
         assert got.killed == killed, (shader, uv, flags, nearest, got.killed)
         if not killed:
             expected = color(nearest)
             if shader < 6 and shader & 1:
-                x, y = map(math.floor, uv)
-                fx, fy = uv[0] - x, uv[1] - y
+                x, y = map(math.floor, sample_uv)
+                fx, fy = sample_uv[0] - x, sample_uv[1] - y
                 taps = [reference_word(shader // 2, x + dx, y + dy) for dx, dy in ((0, 0), (1, 0), (0, 1), (1, 1))]
                 weights = [(1-fx)*(1-fy), fx*(1-fy), (1-fx)*fy, fx*fy]
                 weights = [weight if word else 0 for weight, word in zip(weights, taps)]
@@ -99,7 +100,7 @@ def main():
             vram[:] = [0] * len(vram)
             vram[480*1024+17] = 31
             vram[256*1024+64] = 31 if fmt == 2 else 1
-            for uv in ((0.99999,0.99999),(0.999,0.999),(0.99999,0.5)):
+            for uv in ((0.9995,0.9995),(0.999,0.999),(0.9995,0.5)):
                 for flags in ((0,0,0,0),(1,1,0,0),(2,0,1,0)):
                     check(fmt*2+1,uv,flags)
             # Fully transparent nearest texels still discard.
@@ -138,6 +139,15 @@ def main():
                     for flags in ((0,0,1,0),(1,1,0,0),(2,0,1,0)):
                         check(shader,uv,flags)
         page=[64,256,16,480]
+        # A constant integer UV may arrive one float ULP below its intended
+        # value after raster interpolation. The small sampling bias, as used
+        # by the XDK path, must prevent selecting the preceding texel/mask.
+        for n in (1,2,3,4,15,31,32,63,64,127,128,254,255):
+            bits=struct.unpack('>I',struct.pack('>f',n))[0]
+            below=struct.unpack('>f',struct.pack('>I',bits-1))[0]
+            for shader in range(6):
+                for uv in ((below,0.75),(0.5,below),(below,below)):
+                    check(shader,uv)
         # Color carries at every five-bit boundary, including STP black.
         for word in sorted({0,32768,65535} | {max(0,min(65535,(n<<shift)+delta))
                           for shift in (5,10,15) for n in range(33) for delta in (-1,0,1)}):

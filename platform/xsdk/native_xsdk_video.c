@@ -693,6 +693,86 @@ static void XvClearDiagnosticTarget(XvTarget *target)
 /* One boot-only check of actual GPU pixels, never inferred from frame counts.
  * Four known colors exercise packed uploads, palette lookups and vertex fetch.
  * Keep this off-screen; restore the CPU VRAM and renderer state afterwards. */
+/* Independent bit-based reference for the diagnostic color/index sweeps.
+ * Unlike the old uniform guard test, every lane and many STP/color carries
+ * vary across the image. Constant row UVs also exercise boundary stability. */
+static unsigned XvSweepWord(unsigned format,unsigned row,unsigned u,unsigned v)
+{
+    if(format==TF_16_BIT)return ((v&255)<<8)|(u&255);
+    return (row<<8)+(format==TF_4_BIT?(u&15)*17:(u&255));
+}
+static void XvSweepExpected(unsigned format,unsigned filtering,unsigned row,unsigned x,float rgb[3])
+{
+    float u=(x+0.5f)*(format==TF_4_BIT?16.0f:255.0f)/256.0f+1.0f/4096.0f;
+    float v=(format==TF_16_BIT?(float)row:0.0f)+1.0f/4096.0f;
+    unsigned tx=(unsigned)floorf(u),ty=(unsigned)floorf(v);
+    unsigned nearest=XvSweepWord(format,row,tx,ty);
+    rgb[0]=rgb[1]=rgb[2]=0;
+    if(!nearest)return;
+    float coverage=0,fx=filtering?u-floorf(u):0,fy=filtering?v-floorf(v):0;
+    for(unsigned dy=0;dy<2;dy++)for(unsigned dx=0;dx<2;dx++){
+        unsigned word=XvSweepWord(format,row,tx+dx,ty+dy);
+        float weight=(dx?fx:1-fx)*(dy?fy:1-fy);
+        if(!word)continue;
+        coverage+=weight;
+        for(unsigned channel=0;channel<3;channel++)rgb[channel]+=((word>>(5*channel))&31)*(weight/31.0f);
+    }
+    if(coverage<0.0001f)coverage=0.0001f;
+    for(unsigned channel=0;channel<3;channel++)rgb[channel]=rgb[channel]/coverage*255.0f;
+}
+static void XvColorSweep(void)
+{
+    GrVertex vertices[256*6]={0};
+    xv.offscreen=1;xv.offRect=(RECT16){0,0,256,256};xv.drawPrim=1;xv.blend=BM_NONE;
+    xv.state.rect[2]=xv.state.rect[3]=256;
+    memset(xv.state.flags,0,sizeof(xv.state.flags));xv.state.flags[2]=1;
+    for(unsigned check=34;check<40;check++){
+        unsigned format=(check-34)%3,filtering=check>=37;
+        memset(xv.pixels,0,sizeof(xv.pixels));
+        for(unsigned row=0;row<256;row++){
+            if(format==TF_16_BIT){
+                for(unsigned x=0;x<256;x++)xv.pixels[row*1024+x]=(row<<8)|x;
+            }else{
+                for(unsigned x=0;x<(format==TF_4_BIT?64u:128u);x++){
+                    unsigned packed=0;
+                    if(format==TF_4_BIT)for(unsigned lane=0;lane<4;lane++)packed|=((x*4+lane)&15)<<(lane*4);
+                    else packed=((x*2)&255)|(((x*2+1)&255)<<8);
+                    xv.pixels[row*1024+512+x]=(u16)packed;
+                }
+                for(unsigned i=0;i<(format==TF_4_BIT?16u:256u);i++)
+                    xv.pixels[(256+row)*1024+i]=(u16)((row<<8)+(format==TF_4_BIT?i*17:i));
+            }
+            const unsigned right[6]={0,1,0,0,1,1},bottom[6]={0,0,1,1,0,1};
+            for(unsigned i=0;i<6;i++){
+                GrVertex *vertex=&vertices[row*6+i];
+                vertex->x=right[i]*256;vertex->y=row+bottom[i];
+                vertex->u=right[i]*(format==TF_4_BIT?16:255);vertex->v=format==TF_16_BIT?row:0;
+                vertex->page=format==TF_16_BIT?0:8;vertex->clut=(256+row)*64;
+                vertex->bright=1;vertex->r=vertex->g=vertex->b=vertex->a=255;
+            }
+        }
+        NativeRenderer_SetTexture(NativeRenderer_GetVRAMTexture(),(TexFormat)format);
+        xv.vramCPUChanged=1;NativeRenderer_UpdateVRAM();xv.off.clearStencil=1;XvPass(&xv.off);
+        VkClearAttachment clear={.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT,.colorAttachment=0,.clearValue.color.float32={0,0,0,0}};
+        VkClearRect rect={.rect={{0,0},{256,256}},.layerCount=1};vkCmdClearAttachments(xv.command,1,&clear,1,&rect);
+        NativeRenderer_UpdateVertexBuffer(vertices,256*6);XvDrawTriangles(0,256*2,filtering);XvReadTarget(&xv.off);
+        unsigned bad=0,firstX=0,firstY=0;unsigned char firstRGB[3]={0};float firstExpected[3]={0};
+        for(unsigned y=0;y<256;y++)for(unsigned x=0;x<256;x++){
+            float expected[3];XvSweepExpected(format,filtering,y,x,expected);
+            unsigned char *pixel=xv.staging.map+4*(y*xv.off.width+x);
+            if(fabsf(pixel[0]-expected[0])>2 || fabsf(pixel[1]-expected[1])>2 || fabsf(pixel[2]-expected[2])>2){
+                if(!bad){firstX=x;firstY=y;memcpy(firstRGB,pixel,3);memcpy(firstExpected,expected,sizeof(expected));}
+                bad++;
+            }
+        }
+        float center[3];XvSweepExpected(format,filtering,128,128,center);
+        unsigned char *sample=xv.staging.map+4*(128*xv.off.width+128);
+        Platform_Log("[vulkan-check] check=%u format=%u filter=%u wrong=%u/%u sample=%u,%u,%u expected=%u,%u,%u kind=color-sweep blend=0\n",
+            check,format,filtering,bad,65536u,sample[0],sample[1],sample[2],(unsigned)(center[0]+0.5f),(unsigned)(center[1]+0.5f),(unsigned)(center[2]+0.5f));
+        if(bad)Platform_Log("[vulkan-sweep] check=%u first=%u,%u got=%u,%u,%u expected=%.1f,%.1f,%.1f\n",
+            check,firstX,firstY,firstRGB[0],firstRGB[1],firstRGB[2],firstExpected[0],firstExpected[1],firstExpected[2]);
+    }
+}
 static void XvColorCheck(void)
 {
     const u16 colors[]={0x001f,0x03e0,0x7c00,0x7fff};
@@ -778,6 +858,7 @@ static void XvColorCheck(void)
             check,format,filtering,bad,total,sample[0],sample[1],sample[2],expectedSample[0],expectedSample[1],expectedSample[2],
             stress?"raster-stress":blending?"blend":modulation?(xv.offscreen?"modulated":"main-modulated"):check==12?"debug-flat":flat?"flat":"textured",(unsigned)xv.blend);
     }
+    XvColorSweep();
     g_dbg_texturelessMode=0;xv.blend=BM_NONE;
     memset(xv.pixels,0,sizeof(xv.pixels));xv.vramCPUChanged=1;xv.vramGPUChanged=0;
     xv.offscreen=0;xv.drawPrim=0;xv.texture=NativeRenderer_GetVRAMTexture();xv.format=TF_4_BIT;xv.vertexCursor=0;xv.vertexCount=0;

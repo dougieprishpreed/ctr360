@@ -56,12 +56,30 @@ static struct {
     u16 pixels[1024*512],move[1024*512];
 } xv;
 int g_windowWidth=1280,g_windowHeight=720;
+typedef struct {
+    char tag[4];int first,triangles,outcome,shader,blend,drawPrim,offscreen,ui,filtering,texture,format,clipEnabled;
+    VkRect2D scissor;XvUniform state;
+} XvDrawRecord;
+enum { XV_DRAW_DRAWN,XV_DRAW_DROPPED,XV_DRAW_STP_SKIPPED };
 static int xvEdgeAA=1;
 /* Diagnostics for pixels no draw covers: [debug] reveal_holes clears the main
  * target and the game's background fills to magenta; Back+LB+RB captures the
  * next finished frame (before edge AA) and VRAM to the game folder. */
 static int xvRevealHoles,xvCaptureRequested;
 static unsigned xvCaptureCount;
+/* The captured frame's draw stream, native-endian: each vertex upload, draw
+ * (with its full state, also when dropped or skipped) and background fill
+ * from the frame's BeginScene to its capture. */
+enum { XV_DRAW_LOG_BYTES=8*1024*1024 };
+static unsigned char xvDrawLog[XV_DRAW_LOG_BYTES];
+static size_t xvDrawLogSize;
+static int xvDrawLogState,xvDrawLogTruncated; /* 0 idle, 1 waiting for a frame start, 2 recording */
+static void XvLog(const void *data,size_t bytes)
+{
+    if(xvDrawLogState!=2)return;
+    if(xvDrawLogSize+bytes>sizeof(xvDrawLog)){xvDrawLogTruncated=1;return;}
+    memcpy(xvDrawLog+xvDrawLogSize,data,bytes);xvDrawLogSize+=bytes;
+}
 static void XvColorCheck(void);
 static struct {
     unsigned submits,uploads,reads,draws,passes,shaderDraws[7],quads[4];
@@ -533,6 +551,7 @@ void NativeRenderer_BeginScene(void)
     // Work recorded since the last present may use this slot's vertices;
     // drain it before rewinding. Normally the slot is already free.
     if(xv.recording)XvSubmit();
+    if(xvDrawLogState==1){xvDrawLogState=2;xvDrawLogSize=0;xvDrawLogTruncated=0;}
     xv.vertexCursor=xv.slot*XV_VERTEX_SLOT_BYTES;xv.vertexCount=0;xv.mainValid=0;xv.mainResolved=0;xv.offscreen=0;
     NativeRenderer_UpdateVRAM();xv.main.clearStencil=1;XvPass(&xv.main);
     if(xvRevealHoles){
@@ -577,6 +596,8 @@ void NativeRenderer_UpdateVertexBuffer(const GrVertex *vertices,int count)
     size_t bytes=count*sizeof(XvVertex);
     if(xv.vertexCursor+bytes>(xv.slot+1)*XV_VERTEX_SLOT_BYTES){XvSubmit();xv.vertexCursor=xv.slot*XV_VERTEX_SLOT_BYTES;}
     xv.vertexBase=xv.vertexCursor;xv.vertexCount=count;
+    if(xvDrawLogState==2){struct { char tag[4];int count; } head={{'V','E','R','T'},count};
+        XvLog(&head,sizeof(head));XvLog(vertices,(size_t)count*sizeof(GrVertex));}
     // Draw calls consume this upload synchronously before the next upload.
     // Read CLUT metadata from cached CPU vertices, never GPU-mapped memory.
     xv.sourceVertices=vertices;
@@ -594,13 +615,21 @@ void NativeRenderer_UpdateVertexBuffer(const GrVertex *vertices,int count)
         }
     }
 }
+static void XvLogDraw(int first,int triangles,int outcome,int shader,int filtering)
+{
+    if(xvDrawLogState!=2)return;
+    XvDrawRecord r={{'D','R','A','W'},first,triangles,outcome,shader,(int)xv.blend,xv.drawPrim,xv.offscreen,xv.ui,filtering,
+        (int)xv.texture,(int)xv.format,xv.clipEnabled,xv.scissor,xv.state};
+    XvLog(&r,sizeof(r));
+}
 static void XvDrawTriangles(int first,int triangles,int filtering)
 {
     if(triangles>0)xvCost.trisRequested+=triangles;
     if(first<0 || triangles<=0 || (unsigned)first>xv.vertexCount || (unsigned)triangles>(xv.vertexCount-first)/3){
-        if(triangles>0)xvCost.trisDropped+=triangles;return;}
+        if(triangles>0)xvCost.trisDropped+=triangles;XvLogDraw(first,triangles,XV_DRAW_DROPPED,-1,filtering);return;}
     NativeRenderer_UpdateVRAM();
-    if(!XvTexturePassNeeded(first,triangles)){xvCost.skippedSTPPasses++;xvCost.trisSkipped+=triangles;return;}
+    if(!XvTexturePassNeeded(first,triangles)){xvCost.skippedSTPPasses++;xvCost.trisSkipped+=triangles;
+        XvLogDraw(first,triangles,XV_DRAW_STP_SKIPPED,-1,filtering);return;}
     XvLayout(&xv.vram,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     XvTarget *target=xv.offscreen?&xv.off:&xv.main;XvPass(target);
     unsigned width=xv.offscreen?xv.offRect.w:XV_WIDTH,height=xv.offscreen?xv.offRect.h:XV_HEIGHT;
@@ -619,6 +648,7 @@ static void XvDrawTriangles(int first,int triangles,int filtering)
     vkCmdBindPipeline(xv.command,VK_PIPELINE_BIND_POINT_GRAPHICS,XvPipeline(0,shader+(xv.offscreen?7:0),xv.blend,xv.drawPrim?1:2));
     VkDeviceSize offset=xv.vertexBase;vkCmdBindVertexBuffers(xv.command,0,1,&xv.vertices.buffer,&offset);
     xvCost.draws++;xvCost.shaderDraws[shader]++;xvCost.blendDraws[xv.blend]++;xvCost.uiDraws+=xv.ui!=0;
+    XvLogDraw(first,triangles,XV_DRAW_DRAWN,(int)shader,filtering);
     vkCmdDraw(xv.command,triangles*3,1,first,0);xvCost.trisDrawn+=triangles;if(!xv.offscreen)xv.mainValid=1;
 }
 void NativeRenderer_DrawTriangles(int first,int triangles)
@@ -691,6 +721,7 @@ void NativeRenderer_ClearVRAM(int x,int y,int w,int h,u8 r,u8 g,u8 b)
 
 void NativeRenderer_Clear(int x,int y,int w,int h,u8 r,u8 g,u8 b)
 {
+    if(xvDrawLogState==2){struct { char tag[4];int x,y,w,h,r,g,b; } fill={{'F','I','L','L'},x,y,w,h,r,g,b};XvLog(&fill,sizeof(fill));}
     NativeRenderer_ClearVRAM(x,y,w,h,r,g,b);
     int dx=activeDispEnv.disp.x,dy=activeDispEnv.disp.y,dw=activeDispEnv.disp.w,dh=activeDispEnv.disp.h;
     if(dw<=0 || dh<=0)return;
@@ -737,7 +768,7 @@ void NativeRenderer_StoreFeedback(int x,int y,int w,int h)
     if(xv.mainValid && g_nativeHDIntermediate)xvCost.midpointFeedbackSkips++;
     NativeRenderer_StoreFrameBuffer(x,y,w,h);
 }
-void NativeRenderer_RequestCapture(void) { xvCaptureRequested=1; }
+void NativeRenderer_RequestCapture(void) { xvCaptureRequested=1;if(!xvDrawLogState)xvDrawLogState=1; }
 static void XvWriteCapture(void)
 {
     char path[48];unsigned n=xvCaptureCount++;
@@ -770,13 +801,20 @@ static void XvWriteCapture(void)
         }
         fclose(file);
     }
-    Platform_Log("[capture] %u game:/capture_%03u.bmp + _vram.bin (main target before edge AA) reveal_holes=%d edge_aa=%d filter=%d precise=%d\n",
-        n,n,xvRevealHoles,xvEdgeAA,g_cfg_bilinearFiltering,g_nativePreciseVertices);
+    snprintf(path,sizeof(path),"game:/capture_%03u_draws.bin",n);file=fopen(path,"wb");
+    if(file){
+        unsigned head[6]={0x43545244u /* CTRD */,1,(unsigned)sizeof(GrVertex),(unsigned)sizeof(XvDrawRecord),
+            (unsigned)xvDrawLogTruncated,(unsigned)xvDrawLogSize};
+        fwrite(head,1,sizeof(head),file);fwrite(xvDrawLog,1,xvDrawLogSize,file);fclose(file);
+    }
+    Platform_Log("[capture] %u game:/capture_%03u.bmp + _vram.bin + _draws.bin (%u bytes%s; main target before edge AA) reveal_holes=%d edge_aa=%d filter=%d precise=%d\n",
+        n,n,(unsigned)xvDrawLogSize,xvDrawLogTruncated?", truncated":"",xvRevealHoles,xvEdgeAA,g_cfg_bilinearFiltering,g_nativePreciseVertices);
+    xvDrawLogState=0;
 }
 void NativeRenderer_PresentVRAMRect(int x,int y,int w,int h)
 {
     if(w<=0 || h<=0)return;NativeRenderer_UpdateVRAM();
-    if(xvCaptureRequested && xv.mainResolved){xvCaptureRequested=0;XvWriteCapture();}
+    if(xvCaptureRequested && xv.mainResolved && xvDrawLogState==2){xvCaptureRequested=0;XvWriteCapture();}
     /* Acquisition can precede this frame's submit: render, resolve and
      * presentation stay in queue order, and the flip waits for the frame's
      * fence. The previous frame may still be drawing; its slot is separate. */

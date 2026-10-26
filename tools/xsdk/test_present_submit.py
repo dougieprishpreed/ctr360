@@ -23,7 +23,7 @@ enum {XV_WIDTH=1280,XV_HEIGHT=720};
 typedef struct {int id;} XvTarget;
 static struct {VkDevice device;VkSwapchainKHR swapchain;VkQueue queue;VkFence fence,acquireFence;XvTarget main,vram,swap[3];int mainResolved;} xv;
 static struct {unsigned submits,uploads,reads,draws,passes,shaderDraws[7],quads[4];unsigned submitMS,waitMS,frameWaitMS,acquireMS,presentMS;unsigned blendDraws[5],uiDraws,feedbackRequests,midpointFeedbackSkips,skippedSTPPasses;unsigned gpuFrames,gpuTotalUS,gpuMaxUS,gpuOver16;unsigned trisRequested,trisDrawn,trisDropped,trisSkipped;} xvCost;
-static int xvEdgeAA=1,xvCaptureRequested;
+static int xvEdgeAA=1,xvCaptureRequested,xvDrawLogState=2;
 static unsigned phase,submits,quads,modeSeen,captures;
 static void XvWriteCapture(void){assert(phase==0 && xv.mainResolved);captures++;}
 #define XV_CALL(x) assert((x)==VK_SUCCESS)
@@ -48,7 +48,9 @@ int main(void){
   assert(modeSeen==(resolved?(aa?3:0):2));
  }
  phase=0;NativeRenderer_PresentVRAMRect(0,0,0,216);assert(phase==0);
- /* A capture waits for a rendered main target, then runs once, before acquisition. */
+ /* A capture waits for a recorded frame, then for a rendered main target, then runs once, before acquisition. */
+ phase=submits=quads=0;xv.mainResolved=1;xvCaptureRequested=1;xvDrawLogState=1;NativeRenderer_PresentVRAMRect(0,0,512,216);
+ assert(phase==6 && captures==0 && xvCaptureRequested==1);xvDrawLogState=2;
  phase=submits=quads=0;xv.mainResolved=0;xvCaptureRequested=1;NativeRenderer_PresentVRAMRect(0,0,512,216);
  assert(phase==6 && captures==0 && xvCaptureRequested==1);
  phase=submits=quads=0;xv.mainResolved=1;NativeRenderer_PresentVRAMRect(0,0,512,216);
@@ -86,6 +88,10 @@ static unsigned char staging[XV_WIDTH*XV_HEIGHT*4];
 static struct {XvTarget main;struct {unsigned char *map;} staging;u16 pixels[1024*512];} xv;
 static int xvRevealHoles=1,xvEdgeAA=1,g_cfg_bilinearFiltering=1,g_nativePreciseVertices=1;
 static unsigned xvCaptureCount=7,reads,syncs;
+typedef struct {int16_t x,y,page,clut;unsigned char rest[12];} GrVertex;
+typedef struct {char tag[4];int fields[12];int scissor[4];float state[16];} XvDrawRecord;
+static unsigned char xvDrawLog[64]={'V','E','R','T',0,0,0,1,1,2,3,4,5,6,7,8};
+static size_t xvDrawLogSize=16;static int xvDrawLogState=2,xvDrawLogTruncated=0;
 static void XvReadTarget(XvTarget *t){assert(t==&xv.main);reads++;}
 static void XvSyncCPU(void){assert(reads==1);syncs++;}
 static void Platform_Log(const char *f,...){}
@@ -109,7 +115,11 @@ int main(void){
  snprintf(path,sizeof path,"%s/capture_007_vram.bin",OUT);f=fopen(path,"rb");assert(f);
  static unsigned char vram[1024*512*2];n=fread(vram,1,sizeof vram+1,f);fclose(f);assert(n==sizeof vram);
  for(int i=0;i<1024*512;i+=997)assert((vram[2*i]|vram[2*i+1]<<8)==xv.pixels[i]);
- puts("PASS: actual capture writer: 1280x720 bottom-up 24-bit BMP (BGR), little-endian 1024x512 VRAM words, numbered files");
+ snprintf(path,sizeof path,"%s/capture_007_draws.bin",OUT);f=fopen(path,"rb");assert(f);
+ unsigned head[6];unsigned char rest[64];assert(fread(head,1,sizeof head,f)==sizeof head);n=fread(rest,1,sizeof rest,f);fclose(f);
+ assert(head[0]==0x43545244u && head[1]==1 && head[2]==sizeof(GrVertex) && head[3]==sizeof(XvDrawRecord) && head[4]==0 && head[5]==16);
+ assert(n==16 && !memcmp(rest,xvDrawLog,16) && xvDrawLogState==0);
+ puts("PASS: actual capture writer: 1280x720 bottom-up 24-bit BMP (BGR), little-endian 1024x512 VRAM words, draw stream with header, numbered files");
 }
 '''
 w=w.replace('OUT','"'+out+'"')

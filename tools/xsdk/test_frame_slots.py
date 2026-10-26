@@ -46,6 +46,8 @@ static struct {
 static struct {unsigned submits,submitMS,waitMS,frameWaitMS;} xvCost;
 static int xvRevealHoles;
 static unsigned revealClears;
+static int xvDrawLogState,xvDrawLogTruncated;static size_t xvDrawLogSize,loggedBytes;
+static void XvLog(const void *d,size_t n){assert(xvDrawLogState==2);loggedBytes+=n;}
 /* reveal_holes: one whole-target magenta clear, inside the frame's main pass. */
 void vkCmdClearAttachments(VkCommandBuffer cb,uint32_t n,const VkClearAttachment *c,uint32_t r,const VkClearRect *rect){
  assert(xvRevealHoles && xv.inPass && xv.target==&xv.main && n==1 && r==1 && c->clearValue.color.float32[0]==1 &&
@@ -113,6 +115,9 @@ int main(void){
  unsigned seed=12345,frames=0,drains=0,overflows=0;XvUniform state={0};
  for(unsigned frame=0;frame<400;frame++){
   unsigned clearsBefore=revealClears;xvRevealHoles=frame%3==1;
+  if(frame==5)xvDrawLogState=1;         /* a capture request arms recording for the next frame start */
+  if(frame==6)assert(xvDrawLogState==2 && loggedBytes>0);
+  if(frame==7)xvDrawLogState=0;
   NativeRenderer_BeginScene();assert(revealClears==clearsBefore+(unsigned)xvRevealHoles);
   unsigned draws=20+frame%60;
   for(unsigned draw=0;draw<draws;draw++){

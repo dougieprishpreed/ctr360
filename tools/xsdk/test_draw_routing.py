@@ -43,6 +43,9 @@ static struct {
  const GrVertex *sourceVertices;u16 pixels[1024*512];
 } xv;
 static struct {unsigned draws,shaderDraws[7],blendDraws[5],uiDraws,skippedSTPPasses,trisRequested,trisDrawn,trisDropped,trisSkipped;} xvCost;
+enum { XV_DRAW_DRAWN,XV_DRAW_DROPPED,XV_DRAW_STP_SKIPPED };
+static unsigned logged[3];
+static void XvLogDraw(int first,int triangles,int outcome,int shader,int filtering){logged[outcome]+=triangles;}
 static int g_dbg_texturelessMode,g_cfg_bilinearFiltering=1;
 static unsigned selected,stencil,bound,draws,firstSeen,countSeen;
 static XvTarget *targetSeen;

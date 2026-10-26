@@ -4,9 +4,12 @@ layout(set=0,binding=1) uniform sampler2D vram;
 layout(location=0) in vec4 rgba;
 layout(location=1) in vec4 tc;
 layout(location=2) in vec4 page;
-#if XV_FILTER
+// psx.vert exports four interpolators to every variant, and Xenos writes all
+// of them into a pixel group's registers. The flat variant used to declare one
+// register: the other three spilled into the registers of textured groups
+// still running from the draw before, which came out pure blue or black. Every
+// variant reads the last interpolator, so its registers cover all four.
 layout(location=3) in vec4 uvRange;
-#endif
 layout(location=0) out vec4 result;
 vec2 bytes(vec2 pos) {
     // Callers supply integral word addresses. The VRAM sampler wraps the
@@ -109,7 +112,9 @@ void main() {
     // PSX coverage follows the nearest texel, tested above. A tiny filtered
     // weight at a transparent edge must not punch an extra hole in geometry.
     #if XV_FORMAT == 3
-    result=vec4(c.rgb,s.flags.y);
+    // Read every interpolator (xost takes inputs in order) so r3 stays declared
+    // (see above): dither, page and texel range are never negative, so this adds 0.
+    result=vec4(c.rgb,s.flags.y+min(min(tc.w,page.x),min(uvRange.x,0.0)));
 #else
     result=vec4(c.rgb,min(1.0,s.flags.y+s.flags.z*stp));
 #endif

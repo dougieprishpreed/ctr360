@@ -24,7 +24,8 @@ def work(bundle,name,offscreen,legacy=False):
  return count[0],result.exports[0]
 
 current=a.bundle.read_text();baseline=a.baseline.read_text() if a.baseline else None
-texture_budgets=(44,130,38,108,29,78,2)
+# Flat: 2 more than its colour, to read every interpolator (test_interpolator_registers.py).
+texture_budgets=(44,130,38,108,29,78,4)
 for shader in range(7):
  name='psx_%d_frag'%shader
  main,main_pixel=work(current,name,False);off,off_pixel=work(current,'psx_%d_frag'%(shader+7),True)

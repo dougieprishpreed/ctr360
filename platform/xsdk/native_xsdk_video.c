@@ -58,6 +58,13 @@ int g_windowWidth=1280,g_windowHeight=720;
 static int xvEdgeAA=1;
 /* [debug] self_test = 1 runs the boot checks of actual GPU pixels and logs them. */
 static int xvSelfTest;
+/* Fills of the displayed draw area wait for the next VRAM pass, where the frame's
+ * pack draws over them. Drawn at once, each fill switched the GPU to VRAM and back
+ * mid-frame: a resolve and a redraw of the 720p target in eDRAM each time. Every
+ * reader of the VRAM image applies them first. */
+enum { XV_PENDING_FILLS=16 };
+static struct { VkClearAttachment clear;VkClearRect rect; } xvPendingFills[XV_PENDING_FILLS];
+static unsigned xvPendingFillCount;
 static void XvColorCheck(void);
 static void XvPrepareForGame(void);
 static struct {
@@ -237,6 +244,10 @@ static void XvPass(XvTarget *target)
         .clearValueCount=target->clearStencil?2:0,.pClearValues=clears};
     target->clearStencil=0;
     vkCmdBeginRenderPass(xv.command,&begin,VK_SUBPASS_CONTENTS_INLINE);xv.inPass=1;xvCost.passes++;
+    if(target==&xv.vram){
+        for(unsigned i=0;i<xvPendingFillCount;i++)vkCmdClearAttachments(xv.command,1,&xvPendingFills[i].clear,1,&xvPendingFills[i].rect);
+        xvPendingFillCount=0;
+    }
 }
 static void XvImage(XvTarget *t,unsigned width,unsigned height,int depth)
 {
@@ -332,8 +343,11 @@ static void XvBindUniform(const XvUniform *state,unsigned texture)
     uint32_t offset=xv.uniformCursor;memcpy(xv.uniforms.map+offset,state,sizeof(*state));xv.uniformCursor+=stride;
     vkCmdBindDescriptorSets(xv.command,VK_PIPELINE_BIND_POINT_GRAPHICS,xv.pipelineLayout,0,1,&xv.sets[texture],1,&offset);
 }
+/* Before the VRAM image is read: a copy from it or a readback. */
+static void XvApplyFills(void) { if(xvPendingFillCount)XvPass(&xv.vram); }
 static void XvQuad(XvTarget *to,XvTarget *from,int mode,int x,int y,int width,int height,float sx,float sy,float sw,float sh)
 {
+    if(from==&xv.vram)XvApplyFills();
     XvLayout(from,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);XvPass(to);
     XvReserveUniform();
     VkViewport vp={(float)x,(float)y,(float)width,(float)height,0,1};
@@ -362,7 +376,7 @@ static void XvSyncCPU(void)
 {
     if(!xv.vramGPUChanged)return;
     xvCost.reads++;
-    XvReadTarget(&xv.vram);
+    XvApplyFills();XvReadTarget(&xv.vram);
     for(unsigned i=0;i<1024*512;i++)xv.pixels[i]=(u16)(xv.staging.map[4*i]|xv.staging.map[4*i+1]<<8);
     xv.vramGPUChanged=0;
     XvPaletteReset();
@@ -664,18 +678,35 @@ int NativeRenderer_CaptureVRAMState(void *dst,int size)
 int NativeRenderer_RestoreVRAMState(const void *src,int size)
 {
     if(!src || size<(int)sizeof(xv.pixels))return 0;XvSubmit();memcpy(xv.pixels,src,sizeof(xv.pixels));
-    xv.vramCPUChanged=1;xv.vramGPUChanged=0;xv.mainValid=0;return 1;
+    xv.vramCPUChanged=1;xv.vramGPUChanged=0;xv.mainValid=0;xvPendingFillCount=0;return 1;
 }
+static int XvRectInside(int x,int y,int w,int h,int ox,int oy,int ow,int oh) { return x>=ox && y>=oy && x+w<=ox+ow && y+h<=oy+oh; }
 void NativeRenderer_ClearVRAM(int x,int y,int w,int h,u8 r,u8 g,u8 b)
 {
     if(!XvValidRect(x,y,w,h))return;
-    NativeRenderer_UpdateVRAM();XvPass(&xv.vram);
+    NativeRenderer_UpdateVRAM();
     unsigned color=(r>>3)|((g>>3)<<5)|((b>>3)<<10);
     VkClearAttachment clear={.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT,.colorAttachment=0,
         .clearValue.color.float32={(color&255)/255.0f,(color>>8)/255.0f,0,1}};
-    VkClearRect rect={.rect={{x,y},{w,h}},.layerCount=1};vkCmdClearAttachments(xv.command,1,&clear,1,&rect);
+    VkClearRect rect={.rect={{x,y},{w,h}},.layerCount=1};
     xv.vramGPUChanged=1;
     XvPaletteWritten(x,y,w,h);
+    /* A draw texturing from the draw area takes the feedback path, whose pack applies the fills first. */
+    const RECT16 d=activeDispEnv.disp,c=activeDrawEnv.clip;
+    if(!(xv.inPass && xv.target==&xv.vram) && XvRectInside(x,y,w,h,d.x,d.y,d.w,d.h) && XvRectInside(x,y,w,h,c.x,c.y,c.w,c.h)){
+        unsigned i=0;
+        while(i<xvPendingFillCount && memcmp(&xvPendingFills[i].rect,&rect,sizeof(rect)))i++;
+        if(i<xvPendingFillCount){
+            /* A later fill of the same area replaces it, after any fill since. */
+            memmove(&xvPendingFills[i],&xvPendingFills[i+1],(xvPendingFillCount-i-1)*sizeof(xvPendingFills[0]));
+            xvPendingFillCount--;
+        }
+        if(xvPendingFillCount<XV_PENDING_FILLS){
+            xvPendingFills[xvPendingFillCount].clear=clear;xvPendingFills[xvPendingFillCount].rect=rect;xvPendingFillCount++;
+            return;
+        }
+    }
+    XvPass(&xv.vram);vkCmdClearAttachments(xv.command,1,&clear,1,&rect);
 }
 
 void NativeRenderer_Clear(int x,int y,int w,int h,u8 r,u8 g,u8 b)
@@ -696,6 +727,13 @@ static void XvPack(XvTarget *target,int x,int y,int w,int h)
 {
     if(!XvValidRect(x,y,w,h))return;
     NativeRenderer_UpdateVRAM();
+    /* The pack draws over the fills inside its rectangle; the rest stay in order. */
+    unsigned kept=0;
+    for(unsigned i=0;i<xvPendingFillCount;i++){
+        const VkRect2D *f=&xvPendingFills[i].rect.rect;
+        if(!XvRectInside(f->offset.x,f->offset.y,(int)f->extent.width,(int)f->extent.height,x,y,w,h))xvPendingFills[kept++]=xvPendingFills[i];
+    }
+    xvPendingFillCount=kept;
     float sw=target==&xv.off?(float)w/target->width:1,sh=target==&xv.off?(float)h/target->height:1;
     XvQuad(&xv.vram,target,1,x,y,w,h,0,0,sw,sh);XvLayout(&xv.vram,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);xv.vramGPUChanged=1;
     XvPaletteWritten(x,y,w,h);
@@ -1028,7 +1066,7 @@ static void XvColorCheck(void)
 /* The game's starting state, after the boot checks or in their place. */
 static void XvPrepareForGame(void)
 {
-    g_dbg_texturelessMode=0;xv.blend=BM_NONE;
+    g_dbg_texturelessMode=0;xv.blend=BM_NONE;xvPendingFillCount=0;
     memset(xv.pixels,0,sizeof(xv.pixels));xv.vramCPUChanged=1;xv.vramGPUChanged=0;
     xv.offscreen=0;xv.drawPrim=0;xv.texture=NativeRenderer_GetVRAMTexture();xv.format=TF_4_BIT;xv.vertexCursor=0;xv.vertexCount=0;
     xv.mainValid=xv.mainResolved=0;

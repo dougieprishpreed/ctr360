@@ -90,6 +90,7 @@ static unsigned NativeRenderer_GetVRAMTexture(void){return 1;}
 static void NativeRenderer_UpdateVertexBuffer(const GrVertex *v,int n){assert(n==(copies>=40?19008:copies>=34?1536:6));if(copies>=40)XvRasterMesh(v,n);}
 static void XvDrawTriangles(int first,int n,int filtering){assert(first==0 && n==(copies>=40?6336:copies>=34?512:2));}
 static void XvPass(XvTarget *t){}
+static unsigned xvPendingFillCount=3;
 void vkCmdClearAttachments(VkCommandBuffer c,uint32_t n,const VkClearAttachment *a,uint32_t nr,const VkClearRect *r){}
 void vkCmdClearColorImage(VkCommandBuffer cb,VkImage image,VkImageLayout layout,const VkClearColorValue *color,uint32_t n,const VkImageSubresourceRange *range){
  assert(copies==46 && layout==VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && n==1);
@@ -141,7 +142,7 @@ int main(void){
  xv.main.image=(VkImage)(uintptr_t)&xv.main;xv.off.image=(VkImage)(uintptr_t)&xv.off;
  xv.staging.size=ALLOCATION_BYTES;xv.staging.map=malloc(xv.staging.size);assert(xv.staging.map);
  XvColorCheck();XvPrepareForGame();assert(logs==46 && copies==46 && mainCopies==16 && offCopies==30 && meshUploads==6);
- assert(clears==2 && xv.main.clearStencil && xv.off.clearStencil);
+ assert(clears==2 && xv.main.clearStencil && xv.off.clearStencil && xvPendingFillCount==0);
  assert(xv.mainValid==0 && xv.mainResolved==0);free(xv.staging.map);
  puts("PASS: all 46 actual boot checks including color/index sweeps and mesh coverage/UV range/filter fringe; independent fixture pixels, exact watertight mesh raster, whole-level validator, staging capacity and pitch");
 }

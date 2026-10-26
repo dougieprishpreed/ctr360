@@ -19,7 +19,9 @@ def function(source,start):
 reader=function(s,'static void XvReadTarget(')
 clearer=function(s,'static void XvClearDiagnosticTarget(')
 sweep=function(s,'static unsigned XvSweepWord(')+function(s,'static void XvSweepExpected(')+function(s,'static void XvColorSweep(')+function(s,'static void XvMeshCheck(')
-checks=function(s,'static void XvColorCheck(void)\n{')
+checks=function(s,'static void XvColorCheck(void)\n{')+function(s,'static void XvPrepareForGame(void)\n{')
+# The checks run only on request; the game's starting state is set either way.
+assert 'if(xvSelfTest)XvColorCheck();\n    XvPrepareForGame();' in s,'boot checks not optional or starting state skipped'
 allocate=re.search(r'XvBufferCreate\(&xv.staging,([^,]+),',s)[1]
 validator=function(upstream,'static uint32_t level_size(')+function(upstream,'static bool whole_level(')
 c=r'''
@@ -138,7 +140,7 @@ int main(void){
  xv.main.width=1280;xv.main.height=720;xv.off.width=1024;xv.off.height=512;
  xv.main.image=(VkImage)(uintptr_t)&xv.main;xv.off.image=(VkImage)(uintptr_t)&xv.off;
  xv.staging.size=ALLOCATION_BYTES;xv.staging.map=malloc(xv.staging.size);assert(xv.staging.map);
- XvColorCheck();assert(logs==46 && copies==46 && mainCopies==16 && offCopies==30 && meshUploads==6);
+ XvColorCheck();XvPrepareForGame();assert(logs==46 && copies==46 && mainCopies==16 && offCopies==30 && meshUploads==6);
  assert(clears==2 && xv.main.clearStencil && xv.off.clearStencil);
  assert(xv.mainValid==0 && xv.mainResolved==0);free(xv.staging.map);
  puts("PASS: all 46 actual boot checks including color/index sweeps and mesh coverage/UV range/filter fringe; independent fixture pixels, exact watertight mesh raster, whole-level validator, staging capacity and pitch");

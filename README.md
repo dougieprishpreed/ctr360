@@ -118,7 +118,6 @@ Edit `ctr360.ini` beside `default.xex` to change graphics and controller binding
 interpolation = 1
 texture_filter = 1
 edge_aa = 1
-precise_vertices = 1
 ```
 
 Missing or invalid settings keep their defaults.
@@ -126,7 +125,6 @@ Missing or invalid settings keep their defaults.
 - `interpolation`: `1` renders intermediate poses for 60 FPS throughout single-player play, `2` only in races, and `0` renders at 30 FPS. Game logic and timers keep their original rate either way; 720p and widescreen stay enabled.
 - `texture_filter`: `1` smooths world textures, `0` keeps them sharp.
 - `edge_aa`: `1` smooths polygon edges, `0` turns this off.
-- `precise_vertices`: `1` draws characters and other models at their exact sub-pixel screen position, which closes hairline gaps between their polygons at 720p; `0` keeps the original whole-pixel positions.
 
 Frame rate varies with the scene. To reduce graphics cost, try `edge_aa = 0`, then `texture_filter = 0`. Texture filtering improves sampling; it does not replace the original textures with higher-detail artwork. World geometry uses an expanded 16:9 projection; the original HUD and menu layout keep their authored proportions.
 
@@ -139,6 +137,8 @@ The `[controls]` section maps original PlayStation buttons to Xbox controls for 
 **Saving fails or reports a full card.** Check that `memcards/` can be created and written beside `default.xex`, and that the drive has free space. Back up existing saves before investigating or replacing card files.
 
 **Performance is uneven.** Try `interpolation = 2`, then `0`. When reporting a problem, include the course, mode, how to reproduce it, and the build used. The game writes `default.log` beside `default.xex`; include it when available.
+
+**Graphics look wrong.** Add a `[debug]` section with `self_test = 1` to `ctr360.ini`. The game then checks the console's rendering at startup and records the results in `default.log`; include that log in your report, then remove the setting again.
 
 The display path needs a console; emulators cannot validate this build's presentation.
 

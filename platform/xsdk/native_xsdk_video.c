@@ -8,7 +8,6 @@
 #include <platform/native_renderer.h>
 #include <platform/native_log.h>
 #include <platform/native_config.h>
-#include <platform/native_precise.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -56,37 +55,16 @@ static struct {
     u16 pixels[1024*512],move[1024*512];
 } xv;
 int g_windowWidth=1280,g_windowHeight=720;
-typedef struct {
-    char tag[4];int first,triangles,outcome,shader,blend,drawPrim,offscreen,ui,filtering,texture,format,clipEnabled;
-    VkRect2D scissor;XvUniform state;
-} XvDrawRecord;
-enum { XV_DRAW_DRAWN,XV_DRAW_DROPPED,XV_DRAW_STP_SKIPPED };
 static int xvEdgeAA=1;
-/* Diagnostics for pixels no draw covers: [debug] reveal_holes clears the main
- * target and the game's background fills to magenta; Back+LB+RB captures the
- * next finished frame (before edge AA) and VRAM to the game folder. */
-static int xvRevealHoles,xvCaptureRequested;
-static unsigned xvCaptureCount;
-/* The captured frame's draw stream, native-endian: each vertex upload, draw
- * (with its full state, also when dropped or skipped) and background fill
- * from the frame's BeginScene to its capture. */
-enum { XV_DRAW_LOG_BYTES=8*1024*1024 };
-static unsigned char xvDrawLog[XV_DRAW_LOG_BYTES];
-static size_t xvDrawLogSize;
-static int xvDrawLogState,xvDrawLogTruncated; /* 0 idle, 1 waiting for a frame start, 2 recording */
-static void XvLog(const void *data,size_t bytes)
-{
-    if(xvDrawLogState!=2)return;
-    if(xvDrawLogSize+bytes>sizeof(xvDrawLog)){xvDrawLogTruncated=1;return;}
-    memcpy(xvDrawLog+xvDrawLogSize,data,bytes);xvDrawLogSize+=bytes;
-}
+/* [debug] self_test = 1 runs the boot checks of actual GPU pixels and logs them. */
+static int xvSelfTest;
 static void XvColorCheck(void);
+static void XvPrepareForGame(void);
 static struct {
     unsigned submits,uploads,reads,draws,passes,shaderDraws[7],quads[4];
     unsigned submitMS,waitMS,frameWaitMS,acquireMS,presentMS;
     unsigned blendDraws[5],uiDraws,feedbackRequests,midpointFeedbackSkips,skippedSTPPasses;
     unsigned gpuFrames,gpuTotalUS,gpuMaxUS,gpuOver16;
-    unsigned trisRequested,trisDrawn,trisDropped,trisSkipped;
 } xvCost;
 int g_dbg_wireframeMode=0,g_dbg_texturelessMode=0,g_cfg_bilinearFiltering=1;
 /* CPU palette summaries are valid only while no GPU write overlaps them.
@@ -424,7 +402,7 @@ static void XvCreatePasses(void)
 static void XvConfig(const char *section,const char *key,const char *value,void *context)
 {
     (void)context;
-    if(!strcmp(section,"debug")){if(!strcmp(key,"reveal_holes"))xvRevealHoles=value[0]=='1';return;}
+    if(!strcmp(section,"debug")){if(!strcmp(key,"self_test"))xvSelfTest=value[0]=='1';return;}
     if(strcmp(section,"graphics"))return;
     // interpolation = 2 keeps menus, the hub, cutscenes and results at 30 FPS.
     if(!strcmp(key,"interpolation") && !strcmp(value,"2")){g_nativeHDEnableInterpolation=2;return;}
@@ -433,15 +411,13 @@ static void XvConfig(const char *section,const char *key,const char *value,void 
     if(!strcmp(key,"interpolation"))g_nativeHDEnableInterpolation=enabled;
     if(!strcmp(key,"texture_filter"))g_cfg_bilinearFiltering=enabled;
     if(!strcmp(key,"edge_aa"))xvEdgeAA=enabled;
-    if(!strcmp(key,"precise_vertices"))g_nativePreciseVertices=enabled;
 }
 int NativeRenderer_InitialiseRender(char *name,int width,int height,int fullscreen)
 {
     (void)name;(void)width;(void)height;(void)fullscreen;
-    g_nativePreciseVertices=1;
     NativeConfig_Read("game:/ctr360.ini",XvConfig,NULL);
-    Platform_Log("[graphics] interpolation=%d texture_filter=%d edge_aa=%d precise_vertices=%d reveal_holes=%d\n",
-        g_nativeHDEnableInterpolation,g_cfg_bilinearFiltering,xvEdgeAA,g_nativePreciseVertices,xvRevealHoles);
+    Platform_Log("[graphics] interpolation=%d texture_filter=%d edge_aa=%d self_test=%d\n",
+        g_nativeHDEnableInterpolation,g_cfg_bilinearFiltering,xvEdgeAA,xvSelfTest);
     const char *instanceExtensions[]={VK_KHR_SURFACE_EXTENSION_NAME,VK_KHR_DISPLAY_EXTENSION_NAME};
     const char *deviceExtensions[]={VK_KHR_SWAPCHAIN_EXTENSION_NAME};
     VkApplicationInfo app={.sType=VK_STRUCTURE_TYPE_APPLICATION_INFO,.pApplicationName="ctr360 xSDK experimental",.apiVersion=VK_API_VERSION_1_0};
@@ -540,7 +516,8 @@ int NativeRenderer_InitialiseRender(char *name,int width,int height,int fullscre
     for(unsigned pass=0;pass<3;pass++)for(unsigned mode=0;mode<4;mode++)XvPipeline(pass,14+mode,BM_NONE,0);
     Platform_Log("[vulkan] pipelines ready; submitting initial clears\n");
     XvSubmit();xv.state.rect[2]=512;xv.state.rect[3]=216;xv.state.scale[0]=1;xv.vramCPUChanged=1;
-    XvColorCheck();
+    if(xvSelfTest)XvColorCheck();
+    XvPrepareForGame();
     Platform_Log("[vulkan] 720p renderer initialized (experimental)\n");return 1;
 }
 int NativeRenderer_InitialisePSX(void) { return xv.device!=VK_NULL_HANDLE; }
@@ -551,13 +528,8 @@ void NativeRenderer_BeginScene(void)
     // Work recorded since the last present may use this slot's vertices;
     // drain it before rewinding. Normally the slot is already free.
     if(xv.recording)XvSubmit();
-    if(xvDrawLogState==1){xvDrawLogState=2;xvDrawLogSize=0;xvDrawLogTruncated=0;}
     xv.vertexCursor=xv.slot*XV_VERTEX_SLOT_BYTES;xv.vertexCount=0;xv.mainValid=0;xv.mainResolved=0;xv.offscreen=0;
     NativeRenderer_UpdateVRAM();xv.main.clearStencil=1;XvPass(&xv.main);
-    if(xvRevealHoles){
-        VkClearAttachment clear={.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT,.colorAttachment=0,.clearValue.color.float32={1,0,1,0}};
-        VkClearRect rect={.rect={{0,0},{XV_WIDTH,XV_HEIGHT}},.layerCount=1};vkCmdClearAttachments(xv.command,1,&clear,1,&rect);
-    }
 }
 void NativeRenderer_EndScene(void) { XvEndPass(); }
 void NativeRenderer_EndGpuFrame(void) {}
@@ -596,8 +568,6 @@ void NativeRenderer_UpdateVertexBuffer(const GrVertex *vertices,int count)
     size_t bytes=count*sizeof(XvVertex);
     if(xv.vertexCursor+bytes>(xv.slot+1)*XV_VERTEX_SLOT_BYTES){XvSubmit();xv.vertexCursor=xv.slot*XV_VERTEX_SLOT_BYTES;}
     xv.vertexBase=xv.vertexCursor;xv.vertexCount=count;
-    if(xvDrawLogState==2){struct { char tag[4];int count; } head={{'V','E','R','T'},count};
-        XvLog(&head,sizeof(head));XvLog(vertices,(size_t)count*sizeof(GrVertex));}
     // Draw calls consume this upload synchronously before the next upload.
     // Read CLUT metadata from cached CPU vertices, never GPU-mapped memory.
     xv.sourceVertices=vertices;
@@ -615,21 +585,11 @@ void NativeRenderer_UpdateVertexBuffer(const GrVertex *vertices,int count)
         }
     }
 }
-static void XvLogDraw(int first,int triangles,int outcome,int shader,int filtering)
-{
-    if(xvDrawLogState!=2)return;
-    XvDrawRecord r={{'D','R','A','W'},first,triangles,outcome,shader,(int)xv.blend,xv.drawPrim,xv.offscreen,xv.ui,filtering,
-        (int)xv.texture,(int)xv.format,xv.clipEnabled,xv.scissor,xv.state};
-    XvLog(&r,sizeof(r));
-}
 static void XvDrawTriangles(int first,int triangles,int filtering)
 {
-    if(triangles>0)xvCost.trisRequested+=triangles;
-    if(first<0 || triangles<=0 || (unsigned)first>xv.vertexCount || (unsigned)triangles>(xv.vertexCount-first)/3){
-        if(triangles>0)xvCost.trisDropped+=triangles;XvLogDraw(first,triangles,XV_DRAW_DROPPED,-1,filtering);return;}
+    if(first<0 || triangles<=0 || (unsigned)first>xv.vertexCount || (unsigned)triangles>(xv.vertexCount-first)/3)return;
     NativeRenderer_UpdateVRAM();
-    if(!XvTexturePassNeeded(first,triangles)){xvCost.skippedSTPPasses++;xvCost.trisSkipped+=triangles;
-        XvLogDraw(first,triangles,XV_DRAW_STP_SKIPPED,-1,filtering);return;}
+    if(!XvTexturePassNeeded(first,triangles)){xvCost.skippedSTPPasses++;return;}
     XvLayout(&xv.vram,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     XvTarget *target=xv.offscreen?&xv.off:&xv.main;XvPass(target);
     unsigned width=xv.offscreen?xv.offRect.w:XV_WIDTH,height=xv.offscreen?xv.offRect.h:XV_HEIGHT;
@@ -648,8 +608,7 @@ static void XvDrawTriangles(int first,int triangles,int filtering)
     vkCmdBindPipeline(xv.command,VK_PIPELINE_BIND_POINT_GRAPHICS,XvPipeline(0,shader+(xv.offscreen?7:0),xv.blend,xv.drawPrim?1:2));
     VkDeviceSize offset=xv.vertexBase;vkCmdBindVertexBuffers(xv.command,0,1,&xv.vertices.buffer,&offset);
     xvCost.draws++;xvCost.shaderDraws[shader]++;xvCost.blendDraws[xv.blend]++;xvCost.uiDraws+=xv.ui!=0;
-    XvLogDraw(first,triangles,XV_DRAW_DRAWN,(int)shader,filtering);
-    vkCmdDraw(xv.command,triangles*3,1,first,0);xvCost.trisDrawn+=triangles;if(!xv.offscreen)xv.mainValid=1;
+    vkCmdDraw(xv.command,triangles*3,1,first,0);if(!xv.offscreen)xv.mainValid=1;
 }
 void NativeRenderer_DrawTriangles(int first,int triangles)
 {
@@ -721,7 +680,6 @@ void NativeRenderer_ClearVRAM(int x,int y,int w,int h,u8 r,u8 g,u8 b)
 
 void NativeRenderer_Clear(int x,int y,int w,int h,u8 r,u8 g,u8 b)
 {
-    if(xvDrawLogState==2){struct { char tag[4];int x,y,w,h,r,g,b; } fill={{'F','I','L','L'},x,y,w,h,r,g,b};XvLog(&fill,sizeof(fill));}
     NativeRenderer_ClearVRAM(x,y,w,h,r,g,b);
     int dx=activeDispEnv.disp.x,dy=activeDispEnv.disp.y,dw=activeDispEnv.disp.w,dh=activeDispEnv.disp.h;
     if(dw<=0 || dh<=0)return;
@@ -730,7 +688,6 @@ void NativeRenderer_Clear(int x,int y,int w,int h,u8 r,u8 g,u8 b)
     XvPass(&xv.main);
     VkClearAttachment clear={.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT,.colorAttachment=0,
         .clearValue.color.float32={(r>>3)*8/255.0f,(g>>3)*8/255.0f,(b>>3)*8/255.0f,0}};
-    if(xvRevealHoles){clear.clearValue.color.float32[0]=1;clear.clearValue.color.float32[1]=0;clear.clearValue.color.float32[2]=1;}
     int x0=(left-dx)*XV_WIDTH/dw,y0=(top-dy)*XV_HEIGHT/dh;
     int x1=(right-dx)*XV_WIDTH/dw,y1=(bottom-dy)*XV_HEIGHT/dh;
     VkClearRect rect={.rect={{x0,y0},{x1-x0,y1-y0}},.layerCount=1};vkCmdClearAttachments(xv.command,1,&clear,1,&rect);xv.mainValid=1;
@@ -768,53 +725,9 @@ void NativeRenderer_StoreFeedback(int x,int y,int w,int h)
     if(xv.mainValid && g_nativeHDIntermediate)xvCost.midpointFeedbackSkips++;
     NativeRenderer_StoreFrameBuffer(x,y,w,h);
 }
-void NativeRenderer_RequestCapture(void) { xvCaptureRequested=1;if(!xvDrawLogState)xvDrawLogState=1; }
-static void XvWriteCapture(void)
-{
-    char path[48];unsigned n=xvCaptureCount++;
-    XvReadTarget(&xv.main);
-    snprintf(path,sizeof(path),"game:/capture_%03u.bmp",n);FILE *file=fopen(path,"wb");
-    if(file){
-        /* 24-bit bottom-up BMP; 1280*3 bytes per row needs no padding. */
-        unsigned row=XV_WIDTH*3,size=54+row*XV_HEIGHT;
-        unsigned char header[54]={'B','M'};
-        unsigned fields[][2]={{2,size},{10,54},{14,40},{18,XV_WIDTH},{22,XV_HEIGHT},{34,row*XV_HEIGHT},{38,2835},{42,2835}};
-        for(unsigned i=0;i<sizeof(fields)/sizeof(fields[0]);i++)
-            for(unsigned k=0;k<4;k++)header[fields[i][0]+k]=(unsigned char)(fields[i][1]>>(8*k));
-        header[26]=1;header[28]=24;fwrite(header,1,54,file);
-        static unsigned char line[XV_WIDTH*3];
-        for(int y=XV_HEIGHT-1;y>=0;y--){
-            const unsigned char *src=xv.staging.map+(size_t)y*XV_WIDTH*4;
-            for(int x=0;x<XV_WIDTH;x++){line[3*x]=src[4*x+2];line[3*x+1]=src[4*x+1];line[3*x+2]=src[4*x];}
-            fwrite(line,1,row,file);
-        }
-        fclose(file);
-    }
-    /* VRAM as little-endian 16-bit words, 1024x512, for offline decoding. */
-    XvSyncCPU();
-    snprintf(path,sizeof(path),"game:/capture_%03u_vram.bin",n);file=fopen(path,"wb");
-    if(file){
-        static unsigned char words[1024*2];
-        for(int y=0;y<512;y++){
-            for(int x=0;x<1024;x++){u16 v=xv.pixels[y*1024+x];words[2*x]=(unsigned char)v;words[2*x+1]=(unsigned char)(v>>8);}
-            fwrite(words,1,sizeof(words),file);
-        }
-        fclose(file);
-    }
-    snprintf(path,sizeof(path),"game:/capture_%03u_draws.bin",n);file=fopen(path,"wb");
-    if(file){
-        unsigned head[6]={0x43545244u /* CTRD */,1,(unsigned)sizeof(GrVertex),(unsigned)sizeof(XvDrawRecord),
-            (unsigned)xvDrawLogTruncated,(unsigned)xvDrawLogSize};
-        fwrite(head,1,sizeof(head),file);fwrite(xvDrawLog,1,xvDrawLogSize,file);fclose(file);
-    }
-    Platform_Log("[capture] %u game:/capture_%03u.bmp + _vram.bin + _draws.bin (%u bytes%s; main target before edge AA) reveal_holes=%d edge_aa=%d filter=%d precise=%d\n",
-        n,n,(unsigned)xvDrawLogSize,xvDrawLogTruncated?", truncated":"",xvRevealHoles,xvEdgeAA,g_cfg_bilinearFiltering,g_nativePreciseVertices);
-    xvDrawLogState=0;
-}
 void NativeRenderer_PresentVRAMRect(int x,int y,int w,int h)
 {
     if(w<=0 || h<=0)return;NativeRenderer_UpdateVRAM();
-    if(xvCaptureRequested && xv.mainResolved && xvDrawLogState==2){xvCaptureRequested=0;XvWriteCapture();}
     /* Acquisition can precede this frame's submit: render, resolve and
      * presentation stay in queue order, and the flip waits for the frame's
      * fence. The previous frame may still be drawing; its slot is separate. */
@@ -838,10 +751,9 @@ void NativeRenderer_PresentVRAMRect(int x,int y,int w,int h)
             xvCost.shaderDraws[0],xvCost.shaderDraws[1],xvCost.shaderDraws[2],xvCost.shaderDraws[3],
             xvCost.shaderDraws[4],xvCost.shaderDraws[5],xvCost.shaderDraws[6],
             xvCost.quads[0],xvCost.quads[1],xvCost.quads[2],xvCost.quads[3]);
-        Platform_Log("[vulkan-work] blend-draws=%u,%u,%u,%u,%u ui=%u feedback=%u midpoint-feedback-skips=%u stp-pass-skips=%u tris=%u/%u dropped=%u stp-skipped=%u\n",
+        Platform_Log("[vulkan-work] blend-draws=%u,%u,%u,%u,%u ui=%u feedback=%u midpoint-feedback-skips=%u stp-pass-skips=%u\n",
             xvCost.blendDraws[0],xvCost.blendDraws[1],xvCost.blendDraws[2],xvCost.blendDraws[3],xvCost.blendDraws[4],
-            xvCost.uiDraws,xvCost.feedbackRequests,xvCost.midpointFeedbackSkips,xvCost.skippedSTPPasses,
-            xvCost.trisDrawn,xvCost.trisRequested,xvCost.trisDropped,xvCost.trisSkipped);
+            xvCost.uiDraws,xvCost.feedbackRequests,xvCost.midpointFeedbackSkips,xvCost.skippedSTPPasses);
         if(xvCost.gpuFrames)Platform_Log("[vulkan-gpu] frames=%u avg=%.1fms max=%.1fms over16ms=%u\n",
             xvCost.gpuFrames,xvCost.gpuTotalUS/1000.0/xvCost.gpuFrames,xvCost.gpuMaxUS/1000.0,xvCost.gpuOver16);
         frames=0;lastReport=now;memset(&xvCost,0,sizeof(xvCost));
@@ -1112,6 +1024,10 @@ static void XvColorCheck(void)
     }
     XvColorSweep();
     XvMeshCheck();
+}
+/* The game's starting state, after the boot checks or in their place. */
+static void XvPrepareForGame(void)
+{
     g_dbg_texturelessMode=0;xv.blend=BM_NONE;
     memset(xv.pixels,0,sizeof(xv.pixels));xv.vramCPUChanged=1;xv.vramGPUChanged=0;
     xv.offscreen=0;xv.drawPrim=0;xv.texture=NativeRenderer_GetVRAMTexture();xv.format=TF_4_BIT;xv.vertexCursor=0;xv.vertexCount=0;

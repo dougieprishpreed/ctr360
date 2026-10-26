@@ -1,5 +1,4 @@
 #include <common.h>
-#include <platform/native_precise.h>
 #include <platform/native_renderer.h>
 
 #if defined(CTR_NATIVE)
@@ -47,10 +46,7 @@ static void MainFrame_RegisterGpuLinkRanges(struct GameTracker *gGT)
 		struct DB *db = &gGT->db[i];
 		NativeGpuLinks_RegisterRangeChecked(primLabels[i], db->primMem.start, db->primMem.capacityBytes);
 		NativeGpuLinks_RegisterRangeChecked(otLabels[i], db->otMem.start, db->otMem.capacityBytes);
-		NativePrecise_SetRegion(i, db->primMem.start, db->primMem.capacityBytes);
 	}
-	// The back buffer's primitive memory was just rewound.
-	NativePrecise_NewFrame();
 
 	u32 swapchainOTBytes = ((u32)gGT->numPlyrCurrGame << 12) | 0x18u;
 	for (int i = 0; i < 2; i++)

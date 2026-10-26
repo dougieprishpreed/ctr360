@@ -3459,9 +3459,9 @@ static int RenderBucket_DrawInstPrim_GhostAtRange(struct RenderBucketDrawContext
 	CtrGpu_WriteControlWord(&mask->drawMode, 0xe1000a40);
 	mask->pad = 0;
 	mask->colorAndCode = RenderBucket_Scratch()->split.fadeColor.word;
-	CTR_GteStoreSXY0(&mask->xy0);
-	CTR_GteStoreSXY1(&mask->xy1);
-	CTR_GteStoreSXY(&mask->xy2);
+	CtrGpu_WritePackedXY((VERTTYPE *)&mask->xy0, (u32)MFC2(12));
+	CtrGpu_WritePackedXY((VERTTYPE *)&mask->xy1, (u32)MFC2(13));
+	CtrGpu_WritePackedXY((VERTTYPE *)&mask->xy2, (u32)MFC2(14));
 
 	if (tex == 0)
 	{
@@ -3470,11 +3470,11 @@ static int RenderBucket_DrawInstPrim_GhostAtRange(struct RenderBucketDrawContext
 		CtrGpu_WriteControlWord(&packet->drawMode, 0xe1000a20);
 		packet->pad = 0;
 		CtrGpu_WriteColorCode((u8 *)&packet->body.color0AndCode, 0x32000000 | (u32)MFC2(20));
-		CTR_GteStoreSXY0(&packet->body.xy0);
+		CtrGpu_WritePackedXY((VERTTYPE *)&packet->body.xy0, (u32)MFC2(12));
 		CtrGpu_WriteColorCode((u8 *)&packet->body.color1, (u32)MFC2(21));
-		CTR_GteStoreSXY1(&packet->body.xy1);
+		CtrGpu_WritePackedXY((VERTTYPE *)&packet->body.xy1, (u32)MFC2(13));
 		CtrGpu_WriteColorCode((u8 *)&packet->body.color2, (u32)MFC2(22));
-		CTR_GteStoreSXY(&packet->body.xy2);
+		CtrGpu_WritePackedXY((VERTTYPE *)&packet->body.xy2, (u32)MFC2(14));
 
 		RenderBucket_LinkPrimRaw(otEntry, packet, 0x0e000000);
 		ctx->primMem->cursor = packet + 1;
@@ -3485,13 +3485,13 @@ static int RenderBucket_DrawInstPrim_GhostAtRange(struct RenderBucketDrawContext
 		u32 texWord1 = (RenderBucket_ReadTextureWord(tex, RENDER_BUCKET_TEX_WORD1_OFFSET) & ~0x00600000U) | 0x00200000U;
 
 		CtrGpu_WriteColorCode((u8 *)&packet->body.color0AndCode, 0x36000000 | (u32)MFC2(20));
-		CTR_GteStoreSXY0(&packet->body.xy0);
+		CtrGpu_WritePackedXY((VERTTYPE *)&packet->body.xy0, (u32)MFC2(12));
 		CtrGpu_WritePackedUVWord((u8 *)&packet->body.uv0, RenderBucket_ReadTextureWord(tex, RENDER_BUCKET_TEX_WORD0_OFFSET));
 		CtrGpu_WriteColorCode((u8 *)&packet->body.color1, (u32)MFC2(21));
-		CTR_GteStoreSXY1(&packet->body.xy1);
+		CtrGpu_WritePackedXY((VERTTYPE *)&packet->body.xy1, (u32)MFC2(13));
 		CtrGpu_WritePackedUVWord((u8 *)&packet->body.uv1, texWord1);
 		CtrGpu_WriteColorCode((u8 *)&packet->body.color2, (u32)MFC2(22));
-		CTR_GteStoreSXY(&packet->body.xy2);
+		CtrGpu_WritePackedXY((VERTTYPE *)&packet->body.xy2, (u32)MFC2(14));
 		CtrGpu_WritePackedUVWord((u8 *)&packet->body.uv2, RenderBucket_ReadTextureWord(tex, RENDER_BUCKET_TEX_WORD2_OFFSET));
 
 		RenderBucket_LinkPrimRaw(otEntry, packet, 0x0f000000);
@@ -5325,38 +5325,32 @@ static void RenderBucket_DispatchDrawFunc(struct RenderBucketDrawContext *ctx)
 	}
 
 	RenderBucket_TraceLateIntro("setup-exit", ctx->inst);
-#if defined(CTR_NATIVE)
-	// Split, reflection and special writers draw some triangles from integer
-	// scratch copies. Keep their whole instance integral so a vertex shared
-	// by two triangles gets the same position in both.
-	NativePrecise_Suspend((u32)ctx->idpp->unkEC != RB_RETAIL_DRAWFUNC_NORMAL);
-#endif
 	switch ((u32)ctx->idpp->unkEC)
 	{
 	case RB_RETAIL_DRAWFUNC_NORMAL:
 		s_rbCase[0]++;
 		RenderBucket_DrawFunc_Normal(ctx);
-		break;
+		return;
 
 	case RB_RETAIL_DRAWFUNC_NORMAL_ALT:
 		s_rbCase[1]++;
 		RenderBucket_DrawFunc_NormalAlt(ctx);
-		break;
+		return;
 
 	case RB_RETAIL_DRAWFUNC_SPLIT:
 		s_rbCase[2]++;
 		RenderBucket_DrawFunc_Split(ctx);
-		break;
+		return;
 
 	case RB_RETAIL_DRAWFUNC_SPECIAL:
 		s_rbCase[3]++;
 		RenderBucket_DrawFunc_Special(ctx);
-		break;
+		return;
 
 	case RB_RETAIL_DRAWFUNC_REFLECTION:
 		s_rbCase[4]++;
 		RenderBucket_DrawFunc_Reflection(ctx);
-		break;
+		return;
 
 	default:
 		s_rbUnk++;
@@ -5366,11 +5360,8 @@ static void RenderBucket_DispatchDrawFunc(struct RenderBucketDrawContext *ctx)
 		}
 		// TODO(aalhendi): Port any newly observed draw handlers.
 		// Do not fall through to normal draw; that masks live retail handler rows.
-		break;
+		return;
 	}
-#if defined(CTR_NATIVE)
-	NativePrecise_Suspend(0);
-#endif
 }
 
 static int RenderBucket_PrepareDrawContext(struct RenderBucketDrawContext *ctx, struct Instance *inst, struct Instance *instPlayerBase, struct PrimMem *primMem)

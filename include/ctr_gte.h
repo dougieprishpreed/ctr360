@@ -4,6 +4,9 @@
 #include <ctr_math.h>
 #include <psx/inline_c.h>
 #include <psx/libgte.h>
+#if defined(CTR_NATIVE)
+#include <platform/native_precise.h>
+#endif
 
 static inline void CTR_GteLoadDelay(void)
 {
@@ -144,19 +147,30 @@ static __inline void CTR_GteStoreSXYWord(void *xy, u32 packed)
 	half[1] = (s16)(packed >> 16);
 }
 
+// Native SXY stores also record the sub-pixel position when the destination
+// is a primitive field (platform/native_precise.c).
+#if defined(CTR_NATIVE)
+#define CTR_GtePreciseSXY(xy, slot) NativePrecise_StoreSXY((xy), (slot))
+#else
+#define CTR_GtePreciseSXY(xy, slot) ((void)0)
+#endif
+
 static __inline void CTR_GteStoreSXY(void *xy)
 {
 	CTR_GteStoreSXYWord(xy, MFC2(14));
+	CTR_GtePreciseSXY(xy, 2);
 }
 
 static __inline void CTR_GteStoreSXY0(void *xy)
 {
 	CTR_GteStoreSXYWord(xy, MFC2(12));
+	CTR_GtePreciseSXY(xy, 0);
 }
 
 static __inline void CTR_GteStoreSXY1(void *xy)
 {
 	CTR_GteStoreSXYWord(xy, MFC2(13));
+	CTR_GtePreciseSXY(xy, 1);
 }
 
 static __inline void CTR_GteStoreSXY2(void *xy)
@@ -166,9 +180,9 @@ static __inline void CTR_GteStoreSXY2(void *xy)
 
 static __inline void CTR_GteStoreSXY3(void *xy0, void *xy1, void *xy2)
 {
-	CTR_GteStoreSXYWord(xy0, MFC2(12));
-	CTR_GteStoreSXYWord(xy1, MFC2(13));
-	CTR_GteStoreSXYWord(xy2, MFC2(14));
+	CTR_GteStoreSXY0(xy0);
+	CTR_GteStoreSXY1(xy1);
+	CTR_GteStoreSXY(xy2);
 }
 
 static inline s32 CTR_GteReadMAC1(void)

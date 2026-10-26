@@ -17,7 +17,7 @@ fetch() {
     git -C "$DEPS/$name" checkout --detach "$sha"
   fi
 }
-fetch xsdk main 6346a39e242c6dcc4e9a5a05cd9f9a602fd55f4b
+fetch xsdk main d5593c6fa8a7d60230aa8297947609edfa57393a
 fetch vulkan4xenon main b79913b407504b1e1663e74b14579cd91d2e7040
 fetch glslang-xenon xenon d2f00185cf5feaa449f6e15c1894fb232b2b6bcd
 (cd "$DEPS/xsdk"; PREFIX="$PREFIX" WORK="$DEPS/toolchain-work" JOBS="$JOBS" bash tools/toolchain/build.sh)

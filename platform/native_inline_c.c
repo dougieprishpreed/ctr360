@@ -5,6 +5,7 @@
  */
 
 #include <macros.h>
+#include <platform/native_precise.h>
 #include <psx/gtereg.h>
 #include <psx/inline_c.h>
 #include <psx/libgte.h>
@@ -86,7 +87,14 @@ void MTC2(u32 value, s32 reg)
 {
 	switch (reg)
 	{
+	case 12:
+	case 13:
+	case 14:
+		NativePrecise_OnRegisterWrite(reg - 12, (u32)value);
+		break;
+
 	case 15:
+		NativePrecise_OnRegisterPush((u32)value);
 		C2_SXY0 = C2_SXY1;
 		C2_SXY1 = C2_SXY2;
 		C2_SXY2 = value;
@@ -113,7 +121,14 @@ void MTC2_S(s32 value, s32 reg)
 {
 	switch (reg)
 	{
+	case 12:
+	case 13:
+	case 14:
+		NativePrecise_OnRegisterWrite(reg - 12, (u32)value);
+		break;
+
 	case 15:
+		NativePrecise_OnRegisterPush((u32)value);
 		C2_SXY0 = C2_SXY1;
 		C2_SXY1 = C2_SXY2;
 		C2_SXY2 = value;

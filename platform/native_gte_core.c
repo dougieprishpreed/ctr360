@@ -5,6 +5,7 @@
  */
 
 #include <macros.h>
+#include <platform/native_precise.h>
 #include <psx/gtereg.h>
 #include <psx/libgte.h>
 
@@ -299,11 +300,51 @@ internal int Lm_H(s64 value, int sf)
 	return value_12;
 }
 
+// Exact screen position of the vertex just projected into SXY2, for
+// native_precise.c. Validity depends only on this vertex: FLAG accumulates
+// across RTPT's three, and a vertex shared by two triangles must get the same
+// position in both.
+internal void GTE_PushPreciseProjection(s64 mac1, s64 mac2, s64 mac3, int lm)
+{
+	int valid = 0;
+	int dx = 0;
+	int dy = 0;
+
+	if (g_nativePreciseVertices && m_sf && !lm && mac3 > 0)
+	{
+		s64 ir1 = mac1 >> 12;
+		s64 ir2 = mac2 >> 12;
+		s64 sz3 = mac3 >> 12;
+		s64 h = (u16)C2_H;
+
+		if (ir1 >= -0x8000 && ir1 <= 0x7fff && ir2 >= -0x8000 && ir2 <= 0x7fff && sz3 <= 0xffff && h < sz3 * 2 && C2_SX2 > -0x400 && C2_SX2 < 0x3ff &&
+		    C2_SY2 > -0x400 && C2_SY2 < 0x3ff)
+		{
+			// Both MACs carry the same 12 fraction bits, so they cancel.
+			double scale = (double)h / (double)mac3;
+			double ex = ((double)C2_OFX / 65536.0 + (double)mac1 * scale - (double)C2_SX2) * NATIVE_PRECISE_UNITS;
+			double ey = ((double)C2_OFY / 65536.0 + (double)mac2 * scale - (double)C2_SY2) * NATIVE_PRECISE_UNITS;
+
+			if (ex > -32767.0 && ex < 32767.0 && ey > -32767.0 && ey < 32767.0)
+			{
+				dx = (int)(ex + 32768.5) - 32768;
+				dy = (int)(ey + 32768.5) - 32768;
+				valid = 1;
+			}
+		}
+	}
+
+	NativePrecise_PushProjection((u32)C2_SXY2, valid, dx, dy);
+}
+
 internal int GTE_RotTransPers(int idx, int lm)
 {
-	C2_MAC1 = A1(/*int44*/ (s64)((s64)C2_TRX << 12) + (C2_R11 * VX(idx)) + (C2_R12 * VY(idx)) + (C2_R13 * VZ(idx)));
-	C2_MAC2 = A2(/*int44*/ (s64)((s64)C2_TRY << 12) + (C2_R21 * VX(idx)) + (C2_R22 * VY(idx)) + (C2_R23 * VZ(idx)));
-	C2_MAC3 = A3(/*int44*/ (s64)((s64)C2_TRZ << 12) + (C2_R31 * VX(idx)) + (C2_R32 * VY(idx)) + (C2_R33 * VZ(idx)));
+	s64 mac1 = (s64)((s64)C2_TRX << 12) + (C2_R11 * VX(idx)) + (C2_R12 * VY(idx)) + (C2_R13 * VZ(idx));
+	s64 mac2 = (s64)((s64)C2_TRY << 12) + (C2_R21 * VX(idx)) + (C2_R22 * VY(idx)) + (C2_R23 * VZ(idx));
+	s64 mac3 = (s64)((s64)C2_TRZ << 12) + (C2_R31 * VX(idx)) + (C2_R32 * VY(idx)) + (C2_R33 * VZ(idx));
+	C2_MAC1 = A1(/*int44*/ mac1);
+	C2_MAC2 = A2(/*int44*/ mac2);
+	C2_MAC3 = A3(/*int44*/ mac3);
 	C2_IR1 = Lm_B1(C2_MAC1, lm);
 	C2_IR2 = Lm_B2(C2_MAC2, lm);
 	C2_IR3 = Lm_B3_sf(m_mac3, m_sf, lm);
@@ -316,6 +357,7 @@ internal int GTE_RotTransPers(int idx, int lm)
 	C2_SXY1 = C2_SXY2;
 	C2_SX2 = Lm_G1(F((s64)C2_OFX + ((s64)C2_IR1 * h_over_sz3)) >> 16);
 	C2_SY2 = Lm_G2(F((s64)C2_OFY + ((s64)C2_IR2 * h_over_sz3)) >> 16);
+	GTE_PushPreciseProjection(mac1, mac2, mac3, lm);
 
 	return h_over_sz3;
 }

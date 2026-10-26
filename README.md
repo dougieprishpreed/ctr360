@@ -107,7 +107,7 @@ Use CTR's normal save/load menus. CTR360 creates its own virtual memory-card fil
 
 ## Updating
 
-Replace `default.xex`, and the converted image if you created a new one, while **keeping your existing `memcards/` folder** and `ctr360.ini`. With the Windows package, convert your image in the new package too, then copy its `ctr360-xsdk` folder over the old one; the package contains neither saves nor `ctr360.ini`, so both are kept. Rerunning `stage.py` on an existing folder preserves both as well. Do not delete the old game folder before copying an update unless you have backed up its saves.
+Replace `default.xex`, and the converted image if you created a new one, while **keeping your existing `memcards/` folder** and `ctr360.ini`. With the Windows package, convert your image in the new package too, then copy its `ctr360-xsdk` folder over the old one. It contains no saves, so `memcards/` is kept; it does include a default `ctr360.ini`, so skip replacing that file to keep your own settings. Rerunning `stage.py` on an existing folder preserves both as well. Do not delete the old game folder before copying an update unless you have backed up its saves.
 
 ## Configuration
 
@@ -118,6 +118,7 @@ Edit `ctr360.ini` beside `default.xex` to change graphics and controller binding
 interpolation = 1
 texture_filter = 1
 edge_aa = 1
+precise_vertices = 1
 ```
 
 Missing or invalid settings keep their defaults.
@@ -125,6 +126,7 @@ Missing or invalid settings keep their defaults.
 - `interpolation`: `1` renders intermediate poses for 60 FPS throughout single-player play, `2` only in races, and `0` renders at 30 FPS. Game logic and timers keep their original rate either way; 720p and widescreen stay enabled.
 - `texture_filter`: `1` smooths world textures, `0` keeps them sharp.
 - `edge_aa`: `1` smooths polygon edges, `0` turns this off.
+- `precise_vertices`: `1` draws characters and other models at their exact sub-pixel screen position, which closes hairline gaps between their polygons at 720p; `0` keeps the original whole-pixel positions.
 
 Frame rate varies with the scene. To reduce graphics cost, try `edge_aa = 0`, then `texture_filter = 0`. Texture filtering improves sampling; it does not replace the original textures with higher-detail artwork. World geometry uses an expanded 16:9 projection; the original HUD and menu layout keep their authored proportions.
 

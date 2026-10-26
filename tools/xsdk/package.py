@@ -3,10 +3,10 @@
     Convert disc image.bat   opens a file dialog and converts the chosen dump
     READ ME FIRST.txt
     converter/               convert.py, the cooker, embeddable CPython
-    ctr360-xsdk/             default.xex and notices; assets/ gets ctr-u.bin
+    ctr360-xsdk/             default.xex, ctr360.ini, notices; assets/ gets ctr-u.bin
 
 --dist is the build's dist/ folder (default.xex, licenses/, LICENSE.txt,
-THIRD_PARTY_NOTICES.txt, ctr360.example.ini). The pinned Python embeddable
+THIRD_PARTY_NOTICES.txt, ctr360.example.ini, shipped as ctr360.ini). The pinned Python embeddable
 archive is downloaded unless --python supplies it; either way its hash must
 match. --zip also writes the package as one archive.
 """
@@ -23,6 +23,8 @@ PYTHON_SHA256 = '9e35319bffedab8b36ad44d8f377cb4f1733bcec257a0b6d04d94f01486ddb3
 COOKER = ('cook_disc.py', 'iso_bigfile.py', 'audit_endian_assets.py', 'audit_endian_levels.py')
 GAME = 'ctr360-xsdk'
 DIST = ('default.xex', 'LICENSE.txt', 'THIRD_PARTY_NOTICES.txt', 'ctr360.example.ini')
+# The release ships the example settings ready to use.
+RENAME = {'ctr360.example.ini': 'ctr360.ini'}
 
 LAUNCHER = r'''@echo off
 rem Converts your own Crash Team Racing (USA) disc image for CTR360.
@@ -46,15 +48,15 @@ You need your own Crash Team Racing disc image: the USA release
 
 Updating an existing installation: convert your image with the new package
 too, then copy its ctr360-xsdk folder over the old one. Your saves
-(memcards) and settings (ctr360.ini) are kept.
+(memcards) are kept. To keep your own settings, skip replacing ctr360.ini
+when Windows asks.
 
-Back + Start exits the game. Settings are described in
-ctr360-xsdk\ctr360.example.ini; copy it to ctr360.ini to change them.
+Back + Start exits the game. Settings are in ctr360-xsdk\ctr360.ini; each
+one is described there.
 
 The converter runs on 64-bit Windows 10 or 11 without installation. It
 includes the official Python embeddable package; see
-converter\python\LICENSE.txt. Source code and full instructions:
-https://github.com/dougieprishpreed/ctr360
+converter\python\LICENSE.txt.
 '''
 
 GAME_README = ('CTR360 for Xbox 360, built with the open xSDK and vulkan4xenon.\n'
@@ -99,7 +101,7 @@ def main():
     game = a.out / GAME
     (game / 'assets').mkdir(parents=True)
     for name in DIST:
-        shutil.copy2(a.dist / name, game / name)
+        shutil.copy2(a.dist / name, game / RENAME.get(name, name))
     shutil.copytree(a.dist / 'licenses', game / 'licenses')
     (game / 'README.txt').write_bytes(crlf(GAME_README))
 

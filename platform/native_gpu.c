@@ -14,6 +14,7 @@
 
 #include "platform/native_log.h"
 #include "platform/native_perf.h"
+#include "platform/native_precise.h"
 #include "platform/native_renderer.h"
 
 #include <assert.h>
@@ -387,6 +388,26 @@ void MakeLineArray(GrVertex *vertex, VERTTYPE *p0, VERTTYPE *p1)
 	} // TODO diagonal line alignment
 }
 
+// GTE-projected coordinates use their exact position (platform/
+// native_precise.c): whole pixels move into the coordinate and the fraction,
+// within half a pixel, rides in the spare bytes. Others keep zero.
+static void MakeVertexPrecise(GrVertex *vertex, const VERTTYPE *xy)
+{
+	int16_t dx, dy;
+
+	if (NativePrecise_Lookup(xy, &dx, &dy))
+	{
+		// Biased positive so the shift rounds the same way for both signs.
+		int wx = ((dx + 128 + 0x8000) >> 8) - 0x80;
+		int wy = ((dy + 128 + 0x8000) >> 8) - 0x80;
+
+		vertex->x = (s16)(vertex->x + wx);
+		vertex->y = (s16)(vertex->y + wy);
+		vertex->_p0 = (s8)(dx - wx * 256);
+		vertex->_p1 = (s8)(dy - wy * 256);
+	}
+}
+
 void MakeVertexTriangle(GrVertex *vertex, VERTTYPE *p0, VERTTYPE *p1, VERTTYPE *p2)
 {
 	assert(p0);
@@ -406,6 +427,10 @@ void MakeVertexTriangle(GrVertex *vertex, VERTTYPE *p0, VERTTYPE *p1, VERTTYPE *
 
 	vertex[2].x = p2[0] + ofsX;
 	vertex[2].y = p2[1] + ofsY;
+
+	MakeVertexPrecise(&vertex[0], p0);
+	MakeVertexPrecise(&vertex[1], p1);
+	MakeVertexPrecise(&vertex[2], p2);
 }
 
 void MakeVertexQuad(GrVertex *vertex, VERTTYPE *p0, VERTTYPE *p1, VERTTYPE *p2, VERTTYPE *p3)
@@ -431,6 +456,11 @@ void MakeVertexQuad(GrVertex *vertex, VERTTYPE *p0, VERTTYPE *p1, VERTTYPE *p2, 
 
 	vertex[3].x = p3[0] + ofsX;
 	vertex[3].y = p3[1] + ofsY;
+
+	MakeVertexPrecise(&vertex[0], p0);
+	MakeVertexPrecise(&vertex[1], p1);
+	MakeVertexPrecise(&vertex[2], p2);
+	MakeVertexPrecise(&vertex[3], p3);
 }
 
 void MakeVertexRect(GrVertex *vertex, VERTTYPE *p0, s16 w, s16 h)

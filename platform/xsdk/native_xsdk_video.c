@@ -8,6 +8,7 @@
 #include <platform/native_renderer.h>
 #include <platform/native_log.h>
 #include <platform/native_config.h>
+#include <platform/native_precise.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -406,11 +407,15 @@ static void XvConfig(const char *section,const char *key,const char *value,void 
     if(!strcmp(key,"interpolation"))g_nativeHDEnableInterpolation=enabled;
     if(!strcmp(key,"texture_filter"))g_cfg_bilinearFiltering=enabled;
     if(!strcmp(key,"edge_aa"))xvEdgeAA=enabled;
+    if(!strcmp(key,"precise_vertices"))g_nativePreciseVertices=enabled;
 }
 int NativeRenderer_InitialiseRender(char *name,int width,int height,int fullscreen)
 {
     (void)name;(void)width;(void)height;(void)fullscreen;
+    g_nativePreciseVertices=1;
     NativeConfig_Read("game:/ctr360.ini",XvConfig,NULL);
+    Platform_Log("[graphics] interpolation=%d texture_filter=%d edge_aa=%d precise_vertices=%d\n",
+        g_nativeHDEnableInterpolation,g_cfg_bilinearFiltering,xvEdgeAA,g_nativePreciseVertices);
     const char *instanceExtensions[]={VK_KHR_SURFACE_EXTENSION_NAME,VK_KHR_DISPLAY_EXTENSION_NAME};
     const char *deviceExtensions[]={VK_KHR_SWAPCHAIN_EXTENSION_NAME};
     VkApplicationInfo app={.sType=VK_STRUCTURE_TYPE_APPLICATION_INFO,.pApplicationName="ctr360 xSDK experimental",.apiVersion=VK_API_VERSION_1_0};

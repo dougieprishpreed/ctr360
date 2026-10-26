@@ -13,7 +13,7 @@ The earlier Microsoft XDK build is kept on the [`xdk`](https://github.com/dougie
 - An Xbox 360 capable of launching unsigned homebrew XEX files, with a compatible dashboard such as Aurora.
 - A writable USB drive or HDD for the game folder and saves.
 - Your own **NTSC-U (USA), SCUS-94426** Crash Team Racing disc dump: a raw `.bin` with 2352-byte sectors and its data track starting at byte zero. Other regions, compressed images, and extracted ISO files are not supported.
-- Python 3.11 or newer to convert the disc image.
+- To convert the disc image: 64-bit Windows 10 or 11 with the downloadable package, or Python 3.11 or newer on any system.
 - To build the executable yourself: Linux, or a Linux distribution under WSL on Windows.
 
 The repository contains source code and conversion tools. It does not include the game disc, textures, music, or any SDK files.
@@ -22,7 +22,15 @@ The repository contains source code and conversion tools. It does not include th
 
 ### Download a build
 
-Every update to `main` is built automatically by GitHub Actions. Open the repository's **Actions** tab, choose the latest successful **xSDK build** run, and download its `ctr360-xex` artifact (downloads require a GitHub login). It contains `default.xex`, its license notices, and an example configuration.
+Download the package ZIP from the repository's latest **Release**. On Windows:
+
+1. Unzip it and double-click `Convert disc image.bat`.
+2. Choose your disc image, the `.cue` or the `.bin`, or drop it onto the `.bat`. Your image is only read; the converted copy is written to `ctr360-xsdk\assets\ctr-u.bin`. Conversion takes a few minutes and about 700 MB of free space.
+3. Copy the whole `ctr360-xsdk` folder to writable USB/HDD storage, then launch `default.xex` from your dashboard.
+
+The converter needs no installation: it includes the official Python embeddable package.
+
+Every update to `main` is also built by GitHub Actions. Open the repository's **Actions** tab, choose the latest successful **xSDK build** run, and download its `ctr360-xex` artifact (downloads require a GitHub login). It contains only `default.xex`, its license notices, and an example configuration, for staging the folder yourself as described below.
 
 ### Build it yourself
 
@@ -48,9 +56,9 @@ bash tools/xsdk/build.sh
 
 The executable is written to `build-xsdk/output/default.xex`.
 
-## Preparing the game folder
+## Preparing the game folder yourself
 
-Convert your own original disc dump. The converter writes a separate copy and validates it; keep the original dump and always convert from it, never from an already converted image:
+Without the Windows package, convert your own original disc dump with Python. The converter writes a separate copy and validates it; keep the original dump and always convert from it, never from an already converted image:
 
 ```bash
 python3 tools/ctr360/cook_disc.py --disc "/path/to/CTR-USA.bin" \
@@ -99,7 +107,7 @@ Use CTR's normal save/load menus. CTR360 creates its own virtual memory-card fil
 
 ## Updating
 
-Replace `default.xex`, and the converted image if you created a new one, while **keeping your existing `memcards/` folder** and `ctr360.ini`. Rerunning `stage.py` on an existing folder preserves both. Do not delete the old game folder before copying an update unless you have backed up its saves.
+Replace `default.xex`, and the converted image if you created a new one, while **keeping your existing `memcards/` folder** and `ctr360.ini`. With the Windows package, convert your image in the new package too, then copy its `ctr360-xsdk` folder over the old one; the package contains neither saves nor `ctr360.ini`, so both are kept. Rerunning `stage.py` on an existing folder preserves both as well. Do not delete the old game folder before copying an update unless you have backed up its saves.
 
 ## Configuration
 

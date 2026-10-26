@@ -363,6 +363,20 @@ void Platform_PollHostEvents(void)
 			Platform_Log("[CTR Native] quit chord pressed, leaving to dashboard\n");
 			Platform_Exit(0);
 		}
+#if defined(CTR_XSDK)
+		/* Diagnostic frame capture: Back + LB + RB, once per press. */
+		{
+			extern void NativeRenderer_RequestCapture(void);
+			const WORD captureChord = XINPUT_GAMEPAD_BACK | XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_RIGHT_SHOULDER;
+			static int captureHeld;
+			const int held = (state.Gamepad.wButtons & captureChord) == captureChord;
+			if (held && !captureHeld)
+			{
+				NativeRenderer_RequestCapture();
+			}
+			captureHeld = held;
+		}
+#endif
 	}
 }
 

@@ -42,7 +42,7 @@ static struct {
  TextureID texture; TexFormat format; BlendMode blend;
  const GrVertex *sourceVertices;u16 pixels[1024*512];
 } xv;
-static struct {unsigned draws,shaderDraws[7],blendDraws[5],uiDraws,skippedSTPPasses;} xvCost;
+static struct {unsigned draws,shaderDraws[7],blendDraws[5],uiDraws,skippedSTPPasses,trisRequested,trisDrawn,trisDropped,trisSkipped;} xvCost;
 static int g_dbg_texturelessMode,g_cfg_bilinearFiltering=1;
 static unsigned selected,stencil,bound,draws,firstSeen,countSeen;
 static XvTarget *targetSeen;

@@ -44,6 +44,13 @@ static struct {
  VkDescriptorSet sets[4];VkPipelineLayout pipelineLayout;
 } xv;
 static struct {unsigned submits,submitMS,waitMS,frameWaitMS;} xvCost;
+static int xvRevealHoles;
+static unsigned revealClears;
+/* reveal_holes: one whole-target magenta clear, inside the frame's main pass. */
+void vkCmdClearAttachments(VkCommandBuffer cb,uint32_t n,const VkClearAttachment *c,uint32_t r,const VkClearRect *rect){
+ assert(xvRevealHoles && xv.inPass && xv.target==&xv.main && n==1 && r==1 && c->clearValue.color.float32[0]==1 &&
+  c->clearValue.color.float32[1]==0 && c->clearValue.color.float32[2]==1 && rect->rect.extent.width==1280 && rect->rect.extent.height==720);
+ revealClears++;}
 static unsigned GetTickCount(void){return 0;}
 #define XV_CALL(x) do{if((x)!=VK_SUCCESS)abort();}while(0)
 /* Fake GPU: per-slot writes since the slot's last submission travel with it. */
@@ -105,7 +112,8 @@ int main(void){
  xv.slot=0;xv.command=xv.commands[0];xv.fence=xv.fences[0];
  unsigned seed=12345,frames=0,drains=0,overflows=0;XvUniform state={0};
  for(unsigned frame=0;frame<400;frame++){
-  NativeRenderer_BeginScene();
+  unsigned clearsBefore=revealClears;xvRevealHoles=frame%3==1;
+  NativeRenderer_BeginScene();assert(revealClears==clearsBefore+(unsigned)xvRevealHoles);
   unsigned draws=20+frame%60;
   for(unsigned draw=0;draw<draws;draw++){
    seed=seed*1664525u+1013904223u;
@@ -117,7 +125,7 @@ int main(void){
   assert(Live()<=1 && !xv.pending[xv.slot]);   /* one frame in flight, the recording slot free */
  }
  XvSubmit();assert(Live()==0);
- printf("PASS: %u pipelined frames, %u drains, %u vertex rewinds; no CPU write into in-flight storage, no busy command buffer reuse\n",frames,drains,overflows);
+ printf("PASS: %u pipelined frames, %u drains, %u vertex rewinds; no CPU write into in-flight storage, no busy command buffer reuse; %u reveal_holes frame clears\n",frames,drains,overflows,revealClears);
 }
 '''
 def run(text,name):

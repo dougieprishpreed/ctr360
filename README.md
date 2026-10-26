@@ -1,5 +1,7 @@
 # CTR360
 
+> **This branch is superseded.** It keeps the original Microsoft XDK build for reference and is no longer maintained. The current build uses the open xSDK toolchain on the [`main`](https://github.com/dougieprishpreed/ctr360) branch.
+
 A native Xbox 360 port of **Crash Team Racing**, based on [CTR Native](https://github.com/CTR-tools/ctr-native) and the [CTR-ModSDK](https://github.com/CTR-tools/CTR-ModSDK) decompilation.
 
 CTR360 runs the game from your own PlayStation disc dump. It includes 1280×720 rendering, an expanded 16:9 view, texture filtering, edge smoothing, controller input, audio, and persistent saves. Single-player races target 60 FPS rendering while keeping the original 30 Hz game simulation. Adventure hubs, menus, and other modes retain their normal cadence.

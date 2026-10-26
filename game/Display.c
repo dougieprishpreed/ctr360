@@ -182,6 +182,11 @@ void DISPLAY_Blur_Main(struct PushBuffer *pb, int strength)
 
 	backBuffer->primMem.cursor = nextPrim;
 	backBuffer->blurCameraMask |= (u8)(1 << (cameraID & 0x1f));
+#ifdef _XBOX
+	/* Retail links the blur after the UI environment, which HD squeezes to
+	 * 4:3. Its source is the whole widescreen frame: draw it full width. */
+	PushBuffer_SetDrawEnv_Pass(ot, &gGT->pushBuffer_UI, backBuffer, 0);
+#endif
 }
 
 

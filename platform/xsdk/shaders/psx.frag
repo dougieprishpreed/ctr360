@@ -4,6 +4,9 @@ layout(set=0,binding=1) uniform sampler2D vram;
 layout(location=0) in vec4 rgba;
 layout(location=1) in vec4 tc;
 layout(location=2) in vec4 page;
+#if XV_FILTER
+layout(location=3) in vec4 uvRange;
+#endif
 layout(location=0) out vec4 result;
 vec2 bytes(vec2 pos) {
     // Callers supply integral word addresses. The VRAM sampler wraps the
@@ -61,7 +64,15 @@ void main() {
     // Vertex UVs are bytes, so PSX interpolation stays inside 0..255. Clamp
     // drift and the filtered sprite half-texel offset there; wrapping would
     // sample a texel from the opposite edge of the page instead.
+#if XV_FILTER
+    // PSX texel ranges end exclusively: a triangle's maximum vertex texel
+    // usually starts the next image in the page. Filtered taps would blend
+    // it in along far edges and corners, so keep them inside the range.
+    vec4 range=floor(uvRange+0.5);
+    vec2 uv=min(max(tc.xy+vec2(1.0/4096.0),range.xy),max(range.xy,range.zw-1.0));
+#else
     vec2 uv=clamp(tc.xy+vec2(1.0/4096.0),0.0,255.0);
+#endif
     vec2 p=floor(uv);
     float nearest=textureWord(p,pg);
     float stp=step(32768.0,nearest);

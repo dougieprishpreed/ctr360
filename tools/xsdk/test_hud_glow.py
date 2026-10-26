@@ -18,7 +18,7 @@ def function(source,start):
 body=function(weapon,'void UI_Weapon_DrawBG(')
 constants='enum {'+''.join(re.findall(r'\bUI_WEAPON_BG_\w+\s*=\s*[^,;]+,',weapon))+'};\n'
 color=re.search(r'static const u32 UI_WEAPON_BG_SHINE_COLOR[^;]+;',weapon)[0]
-envs=function(push,'void PushBuffer_SetDrawEnv_Normal(')+function(push,'void PushBuffer_SetDrawEnv_HUDLayer(')
+envs=function(push,'void PushBuffer_SetDrawEnv_Normal(')+function(push,'void PushBuffer_SetDrawEnv_Pass(')
 c=r'''
 #include <stdint.h>
 #include <assert.h>
@@ -53,7 +53,7 @@ enum {NATIVE_HD_HUD_VERTICES=24576,NATIVE_HD_HUD_SPLITS=1024};
 static GrVertex s_hdHUDVertices[NATIVE_HD_HUD_VERTICES];static GPUDrawSplit s_hdHUDSplits[NATIVE_HD_HUD_SPLITS];
 static int s_hdHUDVertexCount,s_hdHUDSplitCount,s_hdHUDCaptureEnabled,s_hdHUDValid;
 static unsigned replays,uploads,captured;
-void PushBuffer_SetDrawEnv_HUDLayer(void *ot,struct PushBuffer *pb,struct DB *backBuffer);
+void PushBuffer_SetDrawEnv_Pass(void *ot,struct PushBuffer *pb,struct DB *backBuffer,int uiPass);
 '''+constants+color+function(libgpu,'void SetDrawEnv(')+envs+function(gpu,'static void NativeGpu_CaptureHUD(')+r'''
 static void UI_WeaponBG_DrawShine(struct Icon *icon,s16 x,s16 y,struct PrimMem *mem,u32 *ot,char transparency,s16 sx,s16 sy,int color){
  assert(icon==sdata->gGT->ptrIcons[49] && sx==4096 && sy==3328 && transparency==2+(calls%2));calls++;
@@ -133,7 +133,7 @@ def run(source,name,defines=('-D_XBOX',)):
 r=run(c,'hud-glow');assert r.returncode==0,r.stderr;print(r.stdout.strip())
 previous=body.replace('ot = &gGT->pushBuffer_UI.ptrOT[UI_WEAPON_BG_SHINE_HUD_SLOT];','ot = gGT->pushBuffer_UI.ptrOT;').replace(
  'PushBuffer_SetDrawEnv_Normal(ot, &gGT->pushBuffer_UI, gGT->backBuffer, 0, 0);','').replace(
- 'PushBuffer_SetDrawEnv_HUDLayer(ot, &gGT->pushBuffer[d->driverID], gGT->backBuffer);','')
+ 'PushBuffer_SetDrawEnv_Pass(ot, &gGT->pushBuffer[d->driverID], gGT->backBuffer, 1);','')
 assert previous!=body and run(c.replace(body,previous),'hud-glow-ui-slot0-negative').returncode!=0
 norestore=body.replace('PushBuffer_SetDrawEnv_Normal(ot, &gGT->pushBuffer_UI, gGT->backBuffer, 0, 0);','')
 assert norestore!=body and run(c.replace(body,norestore),'hud-glow-no-restore-negative').returncode!=0

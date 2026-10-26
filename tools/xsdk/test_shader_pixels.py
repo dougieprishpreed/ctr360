@@ -53,7 +53,7 @@ def main():
     def color(word):
         return [(word >> shift & 31) / 31 for shift in (0, 5, 10)]
 
-    def check(shader, uv, flags=(0, 0, 0, 0), rgba=(1, 1, 1, 1), dither=0, dc=None):
+    def check(shader, uv, flags=(0, 0, 0, 0), rgba=(1, 1, 1, 1), dither=0, dc=None, bounds=(0, 0, 255, 255)):
         nonlocal count
         blob, constants = programs[shader+bank]
         constants = dict(constants)
@@ -68,8 +68,12 @@ def main():
 
         dc = uv if dc is None else dc
         got = simulate.run(blob, registers={0: [*rgba[:3],dc[1]], 1: [*uv,dc[0],dither],
-                                           2: page}, constants=constants, texture_fetch=sample)
+                                           2: page, 3: list(bounds)}, constants=constants, texture_fetch=sample)
         sample_uv=tuple(min(255,max(0,c+1/4096)) for c in uv)
+        if shader < 6 and shader & 1:
+            # Filtered taps keep inside the triangle's texel range, whose
+            # maximum is exclusive (the next image in the page starts there).
+            sample_uv=tuple(min(max(lo,hi-1),max(lo,c)) for c,lo,hi in zip(sample_uv,bounds[:2],bounds[2:]))
         nearest = reference_word(shader // 2, *sample_uv) if shader < 6 else 32767
         stp = bool(nearest & 32768)
         killed = shader < 6 and (nearest == 0 or (flags[0] == 1 and stp) or (flags[0] == 2 and not stp))
@@ -150,12 +154,25 @@ def main():
             for shader in range(6):
                 for uv in ((below,0.75),(0.5,below),(below,below)):
                     check(shader,uv)
+        # Filtered far edges, corners and single-texel ranges never blend in
+        # the texel at a range's exclusive maximum; a filtered sprite's first
+        # column samples its own first texel rather than the one before it.
+        vram[:] = [0] * len(vram)
+        vram[480*1024+16:480*1024+272] = palette
+        for y in range(48):
+            for x in range(64):
+                vram[(256+y)*1024 + 64+x] = ((x*733 + y*97) & 65535) | 1
+        for fmt in range(3):
+            for bounds in ((16,16,32,32),(20,8,21,40),(16,16,16,16),(3,5,9,6)):
+                for uv in ((31.9,20.5),(20.5,31.9),(31.99,31.99),(15.7,20.2),(16.2,15.6),(20.9,8.5),(8.75,5.25),(3.0,5.0)):
+                    check(fmt*2+1,uv,bounds=bounds)
+                    check(fmt*2,uv,bounds=bounds)
         # Color carries at every five-bit boundary, including STP black.
         for word in sorted({0,32768,65535} | {max(0,min(65535,(n<<shift)+delta))
                           for shift in (5,10,15) for n in range(33) for delta in (-1,0,1)}):
             vram[256*1024+64]=word
             check(4,(0.25,0.75),(0,0,1,0))
-    print('PASS: %d actual bundled pixel-shader cases: all packed lanes, palette/STP, transparency, filtering, UV edge clamp, flat colors' % count)
+    print('PASS: %d actual bundled pixel-shader cases: all packed lanes, palette/STP, transparency, filtering inside triangle texel ranges, UV edge clamp, flat colors' % count)
 
 
 if __name__ == '__main__':

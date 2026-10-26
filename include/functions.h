@@ -615,7 +615,7 @@ void PushBuffer_SetDrawEnv_DecalMP(void *ot, struct DB *backBuffer, RECT *viewpo
                                    u8 tpageLower);
 void PushBuffer_SetDrawEnv_Normal(void *ot, struct PushBuffer *pb, struct DB *backBuffer, s16 *copyDrawEnvNULL, int isbg);
 #ifdef _XBOX
-void PushBuffer_SetDrawEnv_HUDLayer(void *ot, struct PushBuffer *pb, struct DB *backBuffer);
+void PushBuffer_SetDrawEnv_Pass(void *ot, struct PushBuffer *pb, struct DB *backBuffer, int uiPass);
 #endif
 
 void PushBuffer_FadeOneWindow(struct PushBuffer *pb);

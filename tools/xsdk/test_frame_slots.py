@@ -18,6 +18,10 @@ sizes=re.search(r'enum \{ XV_WIDTH=.*?\};',s,re.S)[0]
 code=''.join(function(s,name) for name in ('static void XvBegin(','static void XvEndPass(','static void XvQueue(',
  'static unsigned XvWait(','static void XvSubmit(','static void XvSubmitFrame(','static void XvReserveUniform(',
  'static void XvBindUniform(','void NativeRenderer_UpdateVertexBuffer(','void NativeRenderer_BeginScene('))
+# The upload stores whole vertices; record its destination like any CPU write.
+upload='XvVertex *out=(XvVertex *)(xv.vertices.map+xv.vertexCursor);xv.vertexCursor+=bytes;'
+assert code.count(upload)==1
+code=code.replace(upload,upload+'Tracked(out,out,bytes);')
 c=r'''
 #include <vulkan/vulkan.h>
 #include <assert.h>
@@ -27,7 +31,8 @@ c=r'''
 #include <string.h>
 #define MAX_VERTEX_BUFFER_SIZE (1u<<16)
 typedef struct {int16_t x,y,page,clut;uint8_t u,v,bright,dither,r,g,b,a;int8_t tcx,tcy,p0,p1;} GrVertex;
-typedef GrVertex XvVertex;
+typedef uint8_t u8;
+typedef struct {GrVertex v;u8 uvMin[2],uvMax[2];} XvVertex;
 typedef struct {float rect[4],scale[4],flags[4],source[4];} XvUniform;
 typedef struct {int clearStencil;} XvTarget;
 typedef struct {VkDeviceMemory memory;unsigned char *map;} XvBuffer;
@@ -82,6 +87,9 @@ VkResult vkResetFences(VkDevice d,uint32_t n,const VkFence *f){int s=SlotOf(*f);
 VkResult vkResetCommandBuffer(VkCommandBuffer cb,VkCommandBufferResetFlags f){int s=SlotOf(cb);
  for(unsigned i=0;i<flights;i++)assert(!(flight[i].live && flight[i].slot==s));begun[s]=0;return VK_SUCCESS;}
 static void NativeRenderer_UpdateVRAM(void){}
+static void XvStampStart(void){}
+static void XvStampEnd(void){}
+static void XvStampRead(unsigned slot){(void)slot;}
 static void XvBegin(void);
 static void XvPass(XvTarget *target){XvBegin();xv.inPass=1;xv.target=target;}
 #undef memcpy

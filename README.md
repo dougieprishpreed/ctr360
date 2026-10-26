@@ -1,25 +1,42 @@
 # CTR360
 
-A native Xbox 360 port of **Crash Team Racing**, based on [CTR Native](https://github.com/CTR-tools/ctr-native) and the [CTR-ModSDK](https://github.com/CTR-tools/CTR-ModSDK) decompilation.
+A native Xbox 360 port of **Crash Team Racing**, based on [CTR Native](https://github.com/CTR-tools/ctr-native) and the [CTR-ModSDK](https://github.com/CTR-tools/CTR-ModSDK) decompilation. It is built entirely with open tools: [xSDK](https://github.com/xenosworks/xsdk) and [vulkan4xenon](https://github.com/xenosworks/vulkan4xenon), without the Microsoft Xbox 360 SDK.
 
-CTR360 runs the game from your own PlayStation disc dump. It includes 1280Ã—720 rendering, an expanded 16:9 view, texture filtering, edge smoothing, controller input, audio, and persistent saves. Single-player races target 60 FPS rendering while keeping the original 30 Hz game simulation. Adventure hubs, menus, and other modes retain their normal cadence.
+CTR360 runs the game from your own PlayStation disc dump. It includes 1280×720 rendering, an expanded 16:9 view, texture filtering, edge smoothing, controller input, audio, and persistent saves. Single-player play targets 60 FPS rendering, in races and throughout the adventure hub, menus, and cutscenes, while the game simulation keeps its original 30 Hz rate.
 
-CTR360 has been tested on real Xbox 360 hardware. This is an early development build; expect instability while development continues.
+CTR360 is fully playable on real Xbox 360 hardware. Development continues; if something goes wrong, see [Troubleshooting](#troubleshooting).
 
-## Experimental open SDK build
+The earlier Microsoft XDK build is kept on the [`xdk`](https://github.com/dougieprishpreed/ctr360/tree/xdk) branch. It is superseded by this build and no longer maintained.
 
-The `experimental/xsdk-vulkan` branch also builds with [xSDK](https://github.com/xenosworks/xsdk) and [vulkan4xenon](https://github.com/xenosworks/vulkan4xenon), without the Microsoft XDK. This backend is experimental and has not yet been verified on a console. Use a separate game folder and a backup of your saves. The hardware-tested status above applies to the regular XDK backend.
+## What you need
 
-Build on Linux, or in a Linux distribution under WSL. Install the open toolchain prerequisites, then fetch and build the pinned dependencies:
+- An Xbox 360 capable of launching unsigned homebrew XEX files, with a compatible dashboard such as Aurora.
+- A writable USB drive or HDD for the game folder and saves.
+- Your own **NTSC-U (USA), SCUS-94426** Crash Team Racing disc dump: a raw `.bin` with 2352-byte sectors and its data track starting at byte zero. Other regions, compressed images, and extracted ISO files are not supported.
+- Python 3.11 or newer to convert the disc image.
+- To build the executable yourself: Linux, or a Linux distribution under WSL on Windows.
+
+The repository contains source code and conversion tools. It does not include the game disc, textures, music, or any SDK files.
+
+## Getting default.xex
+
+### Download a build
+
+Every update to `main` is built automatically by GitHub Actions. Open the repository's **Actions** tab, choose the latest successful **xSDK build** run, and download its `ctr360-xex` artifact (downloads require a GitHub login). It contains `default.xex`, its license notices, and an example configuration.
+
+### Build it yourself
+
+Install the toolchain prerequisites, then fetch and build the pinned dependencies:
 
 ```bash
 sudo apt-get install build-essential bison flex texinfo libgmp-dev libmpfr-dev libmpc-dev \
   curl xz-utils patch python3 cmake ninja-build git ca-certificates
-git switch experimental/xsdk-vulkan
+git clone https://github.com/dougieprishpreed/ctr360.git
+cd ctr360
 bash tools/xsdk/bootstrap.sh
 ```
 
-Builds default to one compiler job to limit CPU and memory use. The first toolchain build takes time and several gigabytes. For faster WSL builds, keep the dependency and compiler directories on the Linux filesystem; `CTR_XSDK_DEPS` and `XSDK_TOOLCHAIN` override their default locations. Use the paths printed by the bootstrap script, or these defaults:
+Builds default to one compiler job to limit CPU and memory use; set `JOBS` to use more. The first toolchain build takes time and several gigabytes. Under WSL, builds are faster when the dependency and compiler directories are on the Linux filesystem; `CTR_XSDK_DEPS` and `XSDK_TOOLCHAIN` override their default locations. Then build with the paths the bootstrap script prints, or these defaults:
 
 ```bash
 export XSDK="$PWD/build-xsdk/deps/xsdk"
@@ -29,109 +46,37 @@ export XSDK_GLSLANG="$PWD/build-xsdk/deps/glslang-xenon/build-host/StandAlone/gl
 bash tools/xsdk/build.sh
 ```
 
-Convert your own original disc dump and stage a separate console folder:
+The executable is written to `build-xsdk/output/default.xex`.
+
+## Preparing the game folder
+
+Convert your own original disc dump. The converter writes a separate copy and validates it; keep the original dump and always convert from it, never from an already converted image:
 
 ```bash
 python3 tools/ctr360/cook_disc.py --disc "/path/to/CTR-USA.bin" \
   --out "$PWD/build-xsdk/ctr-u-360.bin"
+```
+
+Then stage the console folder:
+
+```bash
 python3 tools/xsdk/stage.py --xex "$PWD/build-xsdk/output/default.xex" \
   --cooked "$PWD/build-xsdk/ctr-u-360.bin" --out "$PWD/build-xsdk/releases/ctr360"
 ```
 
-Copy `build-xsdk/releases/ctr360` to writable console storage. Its configuration and controller layout match the regular build. xSDK's display path currently needs a console; Xenia cannot validate this backend's presentation. Keep `memcards/` and `ctr360.ini` when updating either build.
-
-## What you need
-
-- An Xbox 360 capable of launching unsigned homebrew XEX files, with a compatible dashboard such as Aurora.
-- A writable USB drive or HDD for the game folder and saves.
-- Your own **NTSC-U (USA), SCUS-94426** Crash Team Racing disc dump: a raw `.bin` with 2352-byte sectors and its data track starting at byte zero. Other regions, compressed images, and extracted ISO files are not supported by this pipeline.
-- A Windows PC with the build tools below.
-
-The repository contains source code and conversion tools. It does not include the game disc, textures, music, or the Xbox 360 SDK. The Xbox 360 needs a converted disc image, produced from your dump by the supplied cooker.
-
-## Building on Windows
-
-### Install the tools
-
-The Xbox 360 build uses:
-
-- **Visual Studio 2010**, with Visual C++ installed.
-- **Xbox 360 XDK 21256.3**, including the Xbox 360 Visual Studio/MSBuild integration. Obtain and install the SDK separately; it is not distributed here.
-- **Git for Windows**, including Git Bash.
-- **Python 3.11 or newer**, available as `python` in Git Bash.
-- **LLVM Clang**, available as `clang` in Git Bash.
-
-Install Visual Studio before the XDK. The build script expects the standard Windows installation paths for .NET Framework 4 MSBuild and the Visual Studio 2010 C++ targets. Clang parses and converts the modern C source into an XDK-compatible build tree; the XDK compiler then builds the Xbox 360 executable. SDL and a PSX compiler are not required for this target.
-
-Open **Git Bash** and check that the command-line tools are available:
-
-```bash
-python --version
-clang --version
-git --version
-```
-
-### 1. Get the source
-
-```bash
-git clone https://github.com/dougieprishpreed/ctr360.git
-cd ctr360
-```
-
-### 2. Generate the XDK-compatible sources
-
-Run these commands from the repository root. `pwd -W` supplies the absolute Windows path required by the generator:
-
-```bash
-CTR360_ROOT="$(pwd -W)"
-python tools/ctr360/build_360_mirror.py \
-  --root "$CTR360_ROOT" \
-  --out "$CTR360_ROOT/build-360/gen" \
-  --verify-syntax
-```
-
-Wait for generation and syntax verification to finish successfully. The first pass takes several minutes. The generated `build-360/gen` folder is a build artifact: edit the original source when making changes, then regenerate it. Do not edit the generated copies.
-
-### 3. Compile the executable
-
-```bash
-bash tools/ctr360/build_xex.sh Release
-```
-
-The script stages the tracked XDK project automatically. The executable is written to `build-360/xex/dist/default.xex`; the build log is `build-360/xex_build_log.txt`. If the build reports an error or a stale mirror, resolve it before proceeding. A stale mirror is refreshed with step 2.
-
-### 4. Prepare your disc image
-
-Replace the example path with the location of your own original disc dump:
-
-```bash
-python tools/ctr360/cook_disc.py \
-  --disc "C:/Games/CTR/CTR - Crash Team Racing (USA).bin" \
-  --out "$CTR360_ROOT/build-360/ctr-u-360.bin"
-```
-
-The cooker writes a separate converted copy and validates it. Keep the original dump and wait for conversion to finish successfully before continuing. If updating from an older version, create a fresh converted image with the current cooker. Always convert the original dump; do not convert an already converted image.
-
-### 5. Create the console folder
-
-```bash
-bash tools/ctr360/prep_test.sh --cooked "$CTR360_ROOT/build-360/ctr-u-360.bin"
-python tools/ctr360/stage_release.py
-```
-
-The ready-to-copy folder is **`build-360/releases/ctr360`**:
+The ready-to-copy folder is **`build-xsdk/releases/ctr360`**:
 
 ```text
 ctr360/
   default.xex
-  README.txt
+  ctr360.ini
+  ctr360.example.ini
   assets/
     ctr-u.bin
-    ctr360_graphics.example.txt
   memcards/
 ```
 
-Here `assets/ctr-u.bin` is the converted image, despite its shorter runtime filename. Copy the whole `ctr360` folder to writable USB/HDD storage, then launch `default.xex` from your dashboard.
+`assets/ctr-u.bin` is the converted image. Copy the whole `ctr360` folder to writable USB/HDD storage, then launch `default.xex` from your dashboard. With a downloaded build, stage the folder the same way, passing the downloaded `default.xex`.
 
 ## Playing and saving
 
@@ -139,13 +84,13 @@ The Xbox controller follows the original button layout:
 
 | Xbox 360 | Original PlayStation button |
 | --- | --- |
-| A | Cross â€” accelerate / confirm |
-| B | Circle â€” use item / back |
-| X | Square â€” brake |
+| A | Cross — accelerate / confirm |
+| B | Circle — use item / back |
+| X | Square — brake |
 | Y | Triangle |
-| LB / RB | L1 / R1 â€” hop / powerslide |
+| LB / RB | L1 / R1 — hop / powerslide |
 | LT / RT | L2 / R2 |
-| Start | Start â€” pause |
+| Start | Start — pause |
 | Back | Select |
 
 Use the left stick or D-pad to steer. **Back + Start exits the game**, so avoid pressing that combination during play.
@@ -154,13 +99,11 @@ Use CTR's normal save/load menus. CTR360 creates its own virtual memory-card fil
 
 ## Updating
 
-When rebuilding after a source update, regenerate the mirror, compile the executable, prepare the disc image with the current cooker, and repeat the staging steps. Keep the executable and converted assets from the same source version. The release staging tool preserves the existing `build-360/releases/ctr360/memcards` folder and personal graphics settings.
-
-On your console, replace the executable and supplied assets while **keeping your existing `memcards/` folder** and `ctr360.ini`. Keep `assets/ctr360_graphics.txt` too, if present. Do not delete the old game folder before copying an update unless you have backed up its saves.
+Replace `default.xex`, and the converted image if you created a new one, while **keeping your existing `memcards/` folder** and `ctr360.ini`. Rerunning `stage.py` on an existing folder preserves both. Do not delete the old game folder before copying an update unless you have backed up its saves.
 
 ## Configuration
 
-Edit `ctr360.ini` beside `default.xex` to change graphics and controller bindings. If it is missing, copy `ctr360.example.ini` to `ctr360.ini`. Restart after changes. Graphics defaults are enabled:
+Edit `ctr360.ini` beside `default.xex` to change graphics and controller bindings. If it is missing, copy `ctr360.example.ini` to `ctr360.ini`. Restart after changes. The defaults are:
 
 ```ini
 [graphics]
@@ -169,34 +112,28 @@ texture_filter = 1
 edge_aa = 1
 ```
 
-Each graphics value accepts `0` (off) or `1` (on). The older `assets/ctr360_graphics.txt` is still supported; `ctr360.ini` takes precedence. Missing or invalid settings retain defaults.
+Missing or invalid settings keep their defaults.
 
-- `interpolation`: intermediate render poses for the single-player 60 FPS target. Set this to `0` for the 30 FPS rendering fallback; 720p and widescreen remain enabled.
-- `texture_filter`: smooths world textures.
-- `edge_aa`: smooths polygon edges.
+- `interpolation`: `1` renders intermediate poses for 60 FPS throughout single-player play, `2` only in races, and `0` renders at 30 FPS. Game logic and timers keep their original rate either way; 720p and widescreen stay enabled.
+- `texture_filter`: `1` smooths world textures, `0` keeps them sharp.
+- `edge_aa`: `1` smooths polygon edges, `0` turns this off.
 
-Frame rate varies with the scene. To reduce graphics cost, try `edge_aa = 0`, then `texture_filter = 0`. The 60 FPS option changes rendering cadence; race logic and timers retain their original rate.
+Frame rate varies with the scene. To reduce graphics cost, try `edge_aa = 0`, then `texture_filter = 0`. Texture filtering improves sampling; it does not replace the original textures with higher-detail artwork. World geometry uses an expanded 16:9 projection; the original HUD and menu layout keep their authored proportions.
 
-World geometry uses an expanded 16:9 projection. The original HUD and menu layout retain their authored proportions. Texture filtering improves sampling; it does not replace the original textures with higher-detail artwork.
-
-The `[controls]` section maps original PlayStation buttons to Xbox controls for all controllers. For example, `cross = RT` moves accelerate/confirm to the right trigger, and `r2 = A` moves R2 to A. Available buttons are `A B X Y LB RB LT RT LS RS START BACK DPAD_UP DPAD_DOWN DPAD_LEFT DPAD_RIGHT NONE`. Stick axes use `LEFT_X LEFT_Y RIGHT_X RIGHT_Y`; prefix an axis with `-` to invert it. The supplied example lists every destination and default. Names are case sensitive. The physical **Back + Start** exit shortcut stays active regardless of remapping.
+The `[controls]` section maps original PlayStation buttons to Xbox controls for all controllers. For example, `cross = RT` moves accelerate/confirm to the right trigger, and `r2 = A` moves R2 to A. Available buttons are `A B X Y LB RB LT RT LS RS START BACK DPAD_UP DPAD_DOWN DPAD_LEFT DPAD_RIGHT NONE`. Stick axes use `LEFT_X LEFT_Y RIGHT_X RIGHT_Y`; prefix an axis with `-` to invert it. The supplied example lists every destination and default. Names are case sensitive. The **Back + Start** exit shortcut stays active regardless of remapping.
 
 ## Troubleshooting
 
-**The build cannot find MSBuild or the Xbox 360 platform.** Check the Visual Studio 2010 C++ and XDK integration installations. A current Visual Studio installation alone does not supply the legacy Xbox 360 toolset.
-
-**The generator fails to parse a source file.** Check that Clang is on `PATH`, use the absolute paths in step 2, and resolve the reported syntax error. Do not compile a partially generated mirror.
-
-**The game will not boot or assets appear corrupt.** Copy the entire staged folder and verify that `assets/ctr-u.bin` is the successfully cooked NTSC-U image. A raw PSX image has the wrong byte order for this build.
+**The game will not boot or assets appear corrupt.** Copy the entire staged folder and check that `assets/ctr-u.bin` is a successfully converted NTSC-U image. An unconverted PSX image has the wrong byte order for this build.
 
 **Saving fails or reports a full card.** Check that `memcards/` can be created and written beside `default.xex`, and that the drive has free space. Back up existing saves before investigating or replacing card files.
 
-**Performance is uneven.** Try `interpolation = 0`. If reporting a problem, include the course, mode, how to reproduce it, and the build used. The game writes `ctr360.log` to the first writable location among `cache:\`, `game:\`, `hdd1:\`, and `usb0:\`; include that log when available.
+**Performance is uneven.** Try `interpolation = 2`, then `0`. When reporting a problem, include the course, mode, how to reproduce it, and the build used. The game writes `default.log` beside `default.xex`; include it when available.
 
-For optional Xenia Canary testing, launch the staged XEX with `--allow_game_relative_writes=true` so saves can be written beside it. Console testing remains necessary for performance and compatibility.
+The display path needs a console; emulators cannot validate this build's presentation.
 
 ## Credits and license
 
-Thanks to CTR Native, the CTR-ModSDK contributors, PsyCross/Psy-X, and PSn00bSDK. See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the source license and component notices. Crash Team Racing and its original assets belong to their respective owners.
+Thanks to CTR Native, the CTR-ModSDK contributors, xSDK and vulkan4xenon, PsyCross/Psy-X, and PSn00bSDK. See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the source license and component notices. Crash Team Racing and its original assets belong to their respective owners.
 
 This repository focuses on the Xbox 360 target. Inherited PC platform sources are included; the large PC/PSX toolchain bundles are omitted. For the upstream PC build and its dependencies, see [CTR Native](https://github.com/CTR-tools/ctr-native).

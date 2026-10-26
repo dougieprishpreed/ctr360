@@ -247,6 +247,7 @@ struct NativeAudioXaSource
 	int readLimit;
 	int firstBufferedSector;
 	int bufferedSectors;
+	int singleSector;
 };
 
 struct NativeAudioXaPreparedStream
@@ -1695,6 +1696,20 @@ internal int NativeAudio_BuildXAPath(char *path, size_t pathSize, int categoryID
 	return (written > 0) && ((size_t)written < pathSize);
 }
 
+/* ENG.XNF is constant disc data. Read it once: every in-game voice line
+ * looked it up several times, each a reread from the disc image. */
+static struct NativeAudioByteBuffer s_xnfCache;
+
+internal int NativeAudio_GetXNF(struct NativeAudioByteBuffer *xnf)
+{
+	if ((s_xnfCache.data == NULL) && !NativeAudio_ReadFileBytes("XA/ENG.XNF", &s_xnfCache))
+	{
+		return 0;
+	}
+	*xnf = s_xnfCache;
+	return 1;
+}
+
 internal int NativeAudio_LookupXATrackInfo(int categoryID, int xaID, struct NativeAudioXaTrackInfo *info)
 {
 	struct NativeAudioByteBuffer xnf;
@@ -1704,21 +1719,19 @@ internal int NativeAudio_LookupXATrackInfo(int categoryID, int xaID, struct Nati
 		return 0;
 	}
 
-	if (!NativeAudio_ReadFileBytes("XA/ENG.XNF", &xnf))
+	if (!NativeAudio_GetXNF(&xnf))
 	{
 		return 0;
 	}
 
 	if (xnf.size < XA_HEADER_SIZE)
 	{
-		NativeAudio_FreeByteBuffer(&xnf);
 		return 0;
 	}
 
 	if ((NativeAudio_ReadLE32(&xnf.data[0]) != 0x464e4958) || (NativeAudio_ReadLE32(&xnf.data[4]) != 102) ||
 	    (NativeAudio_ReadLE32(&xnf.data[8]) != XA_NUM_TYPES))
 	{
-		NativeAudio_FreeByteBuffer(&xnf);
 		return 0;
 	}
 
@@ -1726,21 +1739,18 @@ internal int NativeAudio_LookupXATrackInfo(int categoryID, int xaID, struct Nati
 	int numTracksTotal = NativeAudio_ReadLE32(&xnf.data[XA_NUM_TRACKS_TOTAL_OFFSET]);
 	if ((numXasTotal < 0) || (numTracksTotal < 0) || (numXasTotal > ((INT_MAX - XA_HEADER_SIZE) / 4)))
 	{
-		NativeAudio_FreeByteBuffer(&xnf);
 		return 0;
 	}
 
 	int xaSizeOffset = XA_HEADER_SIZE + numXasTotal * 4;
 	if (numTracksTotal > ((INT_MAX - xaSizeOffset) / XA_SIZE_ENTRY_BYTES))
 	{
-		NativeAudio_FreeByteBuffer(&xnf);
 		return 0;
 	}
 
 	int xaSizeEnd = xaSizeOffset + numTracksTotal * XA_SIZE_ENTRY_BYTES;
 	if ((xaSizeEnd < xaSizeOffset) || (xaSizeEnd > xnf.size))
 	{
-		NativeAudio_FreeByteBuffer(&xnf);
 		return 0;
 	}
 
@@ -1748,14 +1758,12 @@ internal int NativeAudio_LookupXATrackInfo(int categoryID, int xaID, struct Nati
 	int firstSongIndex = NativeAudio_ReadLE32(&xnf.data[XA_FIRST_SONG_INDEX_OFFSET + categoryID * 4]);
 	if (xaID >= numSongs)
 	{
-		NativeAudio_FreeByteBuffer(&xnf);
 		return 0;
 	}
 
 	int entryIndex = firstSongIndex + xaID;
 	if ((entryIndex < 0) || (entryIndex >= numTracksTotal))
 	{
-		NativeAudio_FreeByteBuffer(&xnf);
 		return 0;
 	}
 
@@ -1764,7 +1772,6 @@ internal int NativeAudio_LookupXATrackInfo(int categoryID, int xaID, struct Nati
 	info->fileNumber = entry[1];
 	info->numSectors = NativeAudio_ReadLE16Signed(entry + 2);
 
-	NativeAudio_FreeByteBuffer(&xnf);
 	return info->numSectors > 0;
 }
 
@@ -2012,6 +2019,7 @@ internal int NativeAudio_XaSourceReadSector(struct NativeAudioXaSource *src, int
 	{
 		int count = src->readLimit - sector;
 		if (count > NATIVE_AUDIO_XA_READ_BATCH) count = NATIVE_AUDIO_XA_READ_BATCH;
+		if (src->singleSector) count = 1;
 		if (count <= 0) return 0;
 		size_t bytes = (size_t)count * (size_t)src->sectorSize;
 		src->bufferedSectors = 0;
@@ -2059,10 +2067,21 @@ internal int NativeAudio_PrepareXAStream(struct NativeAudioXaSource *src, int ch
 	src->readLimit = sectorsToScan;
 	src->bufferedSectors = 0;
 
-	for (int sector = 0; sector < sectorsToScan; sector++)
+	/* Files interleave their channels at a fixed stride. Once two equal
+	 * gaps between matches give it, read only this channel's sectors, one
+	 * at a time; a sector there that does not match resumes the sequential
+	 * scan after the last match and forgets the gaps, so a pause never
+	 * becomes the stride. Scanning every interleaved sector on the game
+	 * thread stalled each voice line (Aku's hints by about a second). */
+	int lastMatch = -1;
+	int lastGap = 0;
+	int stride = 0;
+
+	for (int sector = 0; sector < sectorsToScan; sector += (stride != 0) ? stride : 1)
 	{
 		u8 *newSectors;
 
+		src->singleSector = stride > 1;
 		if (!NativeAudio_XaSourceReadSector(src, sector, sectorBuf))
 		{
 			NativeAudio_XaPreparedStreamClose(prepared);
@@ -2070,8 +2089,25 @@ internal int NativeAudio_PrepareXAStream(struct NativeAudioXaSource *src, int ch
 		}
 		if (!NativeAudio_IsXAAudioSector(sectorBuf, src->sectorBase, channelFilter))
 		{
+			if (stride != 0)
+			{
+				sector = lastMatch;
+				stride = 0;
+				lastGap = 0;
+			}
 			continue;
 		}
+		if ((stride == 0) && (lastMatch >= 0))
+		{
+			int gap = sector - lastMatch;
+
+			if (gap == lastGap)
+			{
+				stride = gap;
+			}
+			lastGap = gap;
+		}
+		lastMatch = sector;
 
 		const u8 *header = &sectorBuf[src->sectorBase];
 		sampleRate = (((header[3] >> 2) & 0x03) == 0) ? XA_SAMPLE_RATE_37800 : XA_SAMPLE_RATE_18900;

@@ -60,9 +60,9 @@ static unsigned copies,mainCopies,offCopies,logs,clears,meshUploads;
 static long long XvEdge(long long ax,long long ay,long long bx,long long by,long long px,long long py){return (bx-ax)*(py-ay)-(by-ay)*(px-ax);}
 static void XvRasterMesh(const GrVertex *v,int n){
  static unsigned char cover[720][1280];memset(cover,0,sizeof(cover));
- unsigned base=v[0].u<64?0:64;
+ unsigned base=v[0].u<64?0:64,limit=copies==45?64:63;
  for(int t=0;t<n;t+=3){
-  long long x[3],y[3];for(int i=0;i<3;i++){x[i]=15LL*v[t+i].x;y[i]=20LL*v[t+i].y;assert(v[t+i].u>=base && v[t+i].u<=base+63 && v[t+i].v>=base && v[t+i].v<=base+63);}
+  long long x[3],y[3];for(int i=0;i<3;i++){x[i]=15LL*v[t+i].x;y[i]=20LL*v[t+i].y;assert(v[t+i].u>=base && v[t+i].u<=base+limit && v[t+i].v>=base && v[t+i].v<=base+limit);}
   long long area=XvEdge(x[0],y[0],x[1],y[1],x[2],y[2]);assert(area!=0);
   if(area<0){long long tx=x[1],ty=y[1];x[1]=x[2];y[1]=y[2];x[2]=tx;y[2]=ty;}
   long long minX=x[0],maxX=x[0],minY=y[0],maxY=y[0];
@@ -90,7 +90,7 @@ static void XvDrawTriangles(int first,int n,int filtering){assert(first==0 && n=
 static void XvPass(XvTarget *t){}
 void vkCmdClearAttachments(VkCommandBuffer c,uint32_t n,const VkClearAttachment *a,uint32_t nr,const VkClearRect *r){}
 void vkCmdClearColorImage(VkCommandBuffer cb,VkImage image,VkImageLayout layout,const VkClearColorValue *color,uint32_t n,const VkImageSubresourceRange *range){
- assert(copies==45 && layout==VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && n==1);
+ assert(copies==46 && layout==VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && n==1);
  assert(image==(VkImage)(uintptr_t)(clears?&xv.off:&xv.main));
  assert(range->aspectMask==VK_IMAGE_ASPECT_COLOR_BIT && range->baseMipLevel==0 && range->levelCount==1 && range->baseArrayLayer==0 && range->layerCount==1);
  for(unsigned i=0;i<4;i++)assert(color->float32[i]==0);clears++;
@@ -138,10 +138,10 @@ int main(void){
  xv.main.width=1280;xv.main.height=720;xv.off.width=1024;xv.off.height=512;
  xv.main.image=(VkImage)(uintptr_t)&xv.main;xv.off.image=(VkImage)(uintptr_t)&xv.off;
  xv.staging.size=ALLOCATION_BYTES;xv.staging.map=malloc(xv.staging.size);assert(xv.staging.map);
- XvColorCheck();assert(logs==45 && copies==45 && mainCopies==15 && offCopies==30 && meshUploads==5);
+ XvColorCheck();assert(logs==46 && copies==46 && mainCopies==16 && offCopies==30 && meshUploads==6);
  assert(clears==2 && xv.main.clearStencil && xv.off.clearStencil);
  assert(xv.mainValid==0 && xv.mainResolved==0);free(xv.staging.map);
- puts("PASS: all 45 actual boot checks including color/index sweeps and mesh coverage/UV range; independent fixture pixels, exact watertight mesh raster, whole-level validator, staging capacity and pitch");
+ puts("PASS: all 46 actual boot checks including color/index sweeps and mesh coverage/UV range/filter fringe; independent fixture pixels, exact watertight mesh raster, whole-level validator, staging capacity and pitch");
 }
 '''
 c=c.replace('ALLOCATION_BYTES',allocate)
@@ -153,7 +153,8 @@ for case in range(6):
  fmt=case%3;filtered=case>=3;pixels=bytearray()
  for row in range(256):
   for x in range(256):
-   u=(x+.5)*(16 if fmt==0 else 255)/256+1/4096;v=(row if fmt==2 else 0)+1/4096
+   span=16 if fmt==0 else 255;u=(x+.5)*span/256+1/4096;v=(row if fmt==2 else 0)+1/4096
+   if filtered:u=min(u,span-1);v=math.floor(v)
    tx,ty=math.floor(u),math.floor(v);fx=u-tx if filtered else 0;fy=v-ty if filtered else 0
    def word(dx,dy):return (((ty+dy)%256)<<8)|((tx+dx)%256) if fmt==2 else (row<<8)+(((tx+dx)%16)*17 if fmt==0 else (tx+dx)%256)
    if word(0,0)==0:rgb=[0,0,0]

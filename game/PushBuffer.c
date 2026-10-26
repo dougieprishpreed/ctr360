@@ -283,9 +283,10 @@ void PushBuffer_SetDrawEnv_Normal(void *ot, struct PushBuffer *pb, struct DB *ba
 }
 
 #ifdef _XBOX
-/* Link pb's own clip/offset as part of the 4:3 UI pass, for HUD art that
- * retail draws through a player's world OT but HD must squeeze/replay. */
-void PushBuffer_SetDrawEnv_HUDLayer(void *ot, struct PushBuffer *pb, struct DB *backBuffer)
+/* Link pb's own clip/offset, marked as the 4:3 UI pass or the full-width
+ * world pass: HUD art retail draws through a player's world OT, and
+ * full-screen effects retail links after the UI environment. */
+void PushBuffer_SetDrawEnv_Pass(void *ot, struct PushBuffer *pb, struct DB *backBuffer, int uiPass)
 {
     u8 *packet = (u8 *)backBuffer->primMem.cursor;
 
@@ -293,7 +294,8 @@ void PushBuffer_SetDrawEnv_HUDLayer(void *ot, struct PushBuffer *pb, struct DB *
     if ((u8 *)backBuffer->primMem.cursor == packet + 0x40)
     {
         DR_ENV *envPacket = (DR_ENV *)packet;
-        CtrGpu_WriteControlWord(&envPacket->code[2], CTR_ReadU32LE(&envPacket->code[2]) | 0x00800000u);
+        u32 offset = CTR_ReadU32LE(&envPacket->code[2]) & ~0x00800000u;
+        CtrGpu_WriteControlWord(&envPacket->code[2], uiPass ? (offset | 0x00800000u) : offset);
     }
 }
 #endif

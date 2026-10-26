@@ -27,18 +27,21 @@ typedef struct { float rect[4],scale[4],flags[4],source[4]; } XvUniform;
 /* Vulkan formats describe fields by address. The pinned Vulkan layer applies
  * Xenos's per-word byte swap and the appropriate byte/halfword swizzles.
  * Do not substitute DWORD-packed formats for these byte arrays. */
-typedef GrVertex XvVertex;
+/* GrVertex plus its triangle's texel range: U/V minimum, then the exclusive
+ * maximum. PSX sampling never leaves that range; filtered taps keep to it. */
+typedef struct { GrVertex v; u8 uvMin[2],uvMax[2]; } XvVertex;
 typedef struct { float position[4]; } XvQuadVertex;
-CTR_STATIC_ASSERT(sizeof(XvVertex) == 20);
-CTR_STATIC_ASSERT(offsetof(XvVertex, u) == 8);
-CTR_STATIC_ASSERT(offsetof(XvVertex, r) == 12);
-CTR_STATIC_ASSERT(offsetof(XvVertex, tcx) == 16);
+CTR_STATIC_ASSERT(sizeof(XvVertex) == 24);
+CTR_STATIC_ASSERT(offsetof(XvVertex, v.u) == 8);
+CTR_STATIC_ASSERT(offsetof(XvVertex, v.r) == 12);
+CTR_STATIC_ASSERT(offsetof(XvVertex, v.tcx) == 16);
+CTR_STATIC_ASSERT(offsetof(XvVertex, uvMin) == 20);
 static struct {
     VkInstance instance;VkPhysicalDevice physical;VkDevice device;VkQueue queue;
     VkSurfaceKHR surface;VkSwapchainKHR swapchain;unsigned imageCount;
     XvTarget swap[3],main,off,vram;
     VkRenderPass passes[4];VkCommandPool pool;VkCommandBuffer command,commands[2];VkFence fence,fences[2],acquireFence;
-    unsigned slot;int pending[2];
+    unsigned slot;int pending[2],stamped[2];VkQueryPool timestamps;float timestampPeriod;
     VkDescriptorSetLayout setLayout;VkPipelineLayout pipelineLayout;VkDescriptorPool descriptors;
     VkDescriptorSet sets[4];VkSampler sampler,linearSampler,vramSampler;
     VkShaderModule shaders[20];VkPipeline pipelines[3][18][5][3];
@@ -58,6 +61,7 @@ static struct {
     unsigned submits,uploads,reads,draws,passes,shaderDraws[7],quads[4];
     unsigned submitMS,waitMS,frameWaitMS,acquireMS,presentMS;
     unsigned blendDraws[5],uiDraws,feedbackRequests,midpointFeedbackSkips,skippedSTPPasses;
+    unsigned gpuFrames,gpuTotalUS,gpuMaxUS,gpuOver16;
 } xvCost;
 int g_dbg_wireframeMode=0,g_dbg_texturelessMode=0,g_cfg_bilinearFiltering=1;
 /* CPU palette summaries are valid only while no GPU write overlaps them.
@@ -110,6 +114,31 @@ static void XvCheck(VkResult result,const char *operation)
     if(result!=VK_SUCCESS) { Platform_LogError("[vulkan] %s failed: %d\n",operation,(int)result);Platform_Exit(1); }
 }
 #define XV_CALL(call) XvCheck((call),#call)
+/* GPU time of each presented frame: two top-of-pipe stamps per slot, at the
+ * start of its last command buffer and after its final pass has resolved.
+ * A frame split by a drain reports only its last command buffer. */
+static void XvStampStart(void)
+{
+    if(!xv.timestamps)return;
+    vkCmdResetQueryPool(xv.command,xv.timestamps,xv.slot*2,2);
+    vkCmdWriteTimestamp(xv.command,VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,xv.timestamps,xv.slot*2);
+}
+static void XvStampEnd(void)
+{
+    if(!xv.timestamps)return;
+    vkCmdWriteTimestamp(xv.command,VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,xv.timestamps,xv.slot*2+1);
+    xv.stamped[xv.slot]=1;
+}
+static void XvStampRead(unsigned slot)
+{
+    uint64_t stamps[2];
+    if(!xv.stamped[slot])return;
+    xv.stamped[slot]=0;
+    if(vkGetQueryPoolResults(xv.device,xv.timestamps,slot*2,2,sizeof(stamps),stamps,sizeof(stamps[0]),VK_QUERY_RESULT_64_BIT)!=VK_SUCCESS ||
+       stamps[1]<stamps[0])return;
+    unsigned us=(unsigned)((double)(stamps[1]-stamps[0])*xv.timestampPeriod/1000.0);
+    xvCost.gpuFrames++;xvCost.gpuTotalUS+=us;if(us>xvCost.gpuMaxUS)xvCost.gpuMaxUS=us;xvCost.gpuOver16+=us>16667;
+}
 static void XvBufferCreate(XvBuffer *buffer,size_t bytes,VkBufferUsageFlags usage)
 {
     VkBufferCreateInfo info={.sType=VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,.size=bytes,.usage=usage};
@@ -134,6 +163,7 @@ static void XvBegin(void)
     if(xv.recording)return;
     VkCommandBufferBeginInfo begin={.sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,.flags=VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
     XV_CALL(vkBeginCommandBuffer(xv.command,&begin));xv.recording=1;
+    XvStampStart();
 }
 static void XvEndPass(void) { if(xv.inPass){vkCmdEndRenderPass(xv.command);xv.inPass=0;} }
 /* Each frame slot owns a command buffer, its fence and half of the vertex and
@@ -158,6 +188,7 @@ static unsigned XvWait(unsigned slot)
     unsigned started=GetTickCount();
     XV_CALL(vkWaitForFences(xv.device,1,&xv.fences[slot],VK_TRUE,UINT64_MAX));
     unsigned waited=GetTickCount()-started;xvCost.waitMS+=waited;
+    XvStampRead(slot);
     XV_CALL(vkResetFences(xv.device,1,&xv.fences[slot]));
     XV_CALL(vkResetCommandBuffer(xv.commands[slot],0));
     xv.pending[slot]=0;return waited;
@@ -174,6 +205,7 @@ static void XvSubmit(void)
  * other slot once the previously presented frame, its last user, is done. */
 static void XvSubmitFrame(void)
 {
+    XvEndPass();XvStampEnd();
     XvQueue();
     xv.slot^=1;xv.command=xv.commands[xv.slot];xv.fence=xv.fences[xv.slot];
     xvCost.frameWaitMS+=XvWait(xv.slot);
@@ -253,14 +285,15 @@ static VkPipeline XvPipeline(unsigned pass,int shader,BlendMode blend,int stenci
         {.sType=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,.stage=VK_SHADER_STAGE_VERTEX_BIT,.module=xv.shaders[quad?1:0],.pName="main"},
         {.sType=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,.stage=VK_SHADER_STAGE_FRAGMENT_BIT,.module=xv.shaders[2+shader],.pName="main"}};
     VkVertexInputBindingDescription binding={0,quad?sizeof(XvQuadVertex):sizeof(XvVertex),VK_VERTEX_INPUT_RATE_VERTEX};
-    VkVertexInputAttributeDescription attrs[4]={
+    VkVertexInputAttributeDescription attrs[5]={
         {0,0,VK_FORMAT_R16G16B16A16_SSCALED,0},
         {1,0,VK_FORMAT_R8G8B8A8_USCALED,8},
         {2,0,VK_FORMAT_R8G8B8A8_UNORM,12},
-        {3,0,VK_FORMAT_R8G8B8A8_SSCALED,16}};
+        {3,0,VK_FORMAT_R8G8B8A8_SSCALED,16},
+        {4,0,VK_FORMAT_R8G8B8A8_USCALED,20}};
     if(quad)attrs[0].format=VK_FORMAT_R32G32B32A32_SFLOAT;
     VkPipelineVertexInputStateCreateInfo input={.sType=VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-        .vertexBindingDescriptionCount=1,.pVertexBindingDescriptions=&binding,.vertexAttributeDescriptionCount=quad?1:4,.pVertexAttributeDescriptions=attrs};
+        .vertexBindingDescriptionCount=1,.pVertexBindingDescriptions=&binding,.vertexAttributeDescriptionCount=quad?1:5,.pVertexAttributeDescriptions=attrs};
     VkPipelineInputAssemblyStateCreateInfo assembly={.sType=VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,.topology=quad?VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP:VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST};
     VkPipelineViewportStateCreateInfo viewport={.sType=VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,.viewportCount=1,.scissorCount=1};
     VkPipelineRasterizationStateCreateInfo raster={.sType=VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,.polygonMode=VK_POLYGON_MODE_FILL,.cullMode=VK_CULL_MODE_NONE,.frontFace=VK_FRONT_FACE_COUNTER_CLOCKWISE,.lineWidth=1};
@@ -366,6 +399,8 @@ static void XvCreatePasses(void)
 static void XvConfig(const char *section,const char *key,const char *value,void *context)
 {
     (void)context;if(strcmp(section,"graphics"))return;
+    // interpolation = 2 keeps menus, the hub, cutscenes and results at 30 FPS.
+    if(!strcmp(key,"interpolation") && !strcmp(value,"2")){g_nativeHDEnableInterpolation=2;return;}
     if(strcmp(value,"0") && strcmp(value,"1"))return;
     int enabled=value[0]=='1';
     if(!strcmp(key,"interpolation"))g_nativeHDEnableInterpolation=enabled;
@@ -383,6 +418,7 @@ int NativeRenderer_InitialiseRender(char *name,int width,int height,int fullscre
     XV_CALL(vkCreateInstance(&instance,NULL,&xv.instance));unsigned count=1;XV_CALL(vkEnumeratePhysicalDevices(xv.instance,&count,&xv.physical));
     VkPhysicalDeviceProperties properties;vkGetPhysicalDeviceProperties(xv.physical,&properties);
     xv.uniformAlignment=properties.limits.minUniformBufferOffsetAlignment;
+    xv.timestampPeriod=properties.limits.timestampPeriod;
     if(xv.uniformAlignment<64)xv.uniformAlignment=64;
     float priority=1;VkDeviceQueueCreateInfo queue={.sType=VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,.queueCount=1,.pQueuePriorities=&priority};
     VkDeviceCreateInfo device={.sType=VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,.queueCreateInfoCount=1,.pQueueCreateInfos=&queue,.enabledExtensionCount=1,.ppEnabledExtensionNames=deviceExtensions};
@@ -407,6 +443,8 @@ int NativeRenderer_InitialiseRender(char *name,int width,int height,int fullscre
     for(unsigned i=0;i<2;i++)XV_CALL(vkCreateFence(xv.device,&fence,NULL,&xv.fences[i]));
     XV_CALL(vkCreateFence(xv.device,&fence,NULL,&xv.acquireFence));
     xv.slot=0;xv.command=xv.commands[0];xv.fence=xv.fences[0];
+    VkQueryPoolCreateInfo queries={.sType=VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,.queryType=VK_QUERY_TYPE_TIMESTAMP,.queryCount=4};
+    if(vkCreateQueryPool(xv.device,&queries,NULL,&xv.timestamps)!=VK_SUCCESS)xv.timestamps=VK_NULL_HANDLE;
     XvCreatePasses();
     for(unsigned i=0;i<xv.imageCount;i++){
         XvTarget *t=&xv.swap[i];t->image=images[i];t->width=XV_WIDTH;t->height=XV_HEIGHT;t->pass=2;
@@ -526,7 +564,18 @@ void NativeRenderer_UpdateVertexBuffer(const GrVertex *vertices,int count)
     // Read CLUT metadata from cached CPU vertices, never GPU-mapped memory.
     xv.sourceVertices=vertices;
     XvVertex *out=(XvVertex *)(xv.vertices.map+xv.vertexCursor);xv.vertexCursor+=bytes;
-    memcpy(out,vertices,bytes);
+    for(int first=0;first<count;first+=3){
+        int corners=count-first<3?count-first:3;
+        u8 u0=255,v0=255,u1=0,v1=0;
+        for(int i=0;i<corners;i++){
+            const GrVertex *g=&vertices[first+i];
+            if(g->u<u0)u0=g->u;if(g->u>u1)u1=g->u;if(g->v<v0)v0=g->v;if(g->v>v1)v1=g->v;
+        }
+        for(int i=0;i<corners;i++){
+            XvVertex *o=&out[first+i];
+            o->v=vertices[first+i];o->uvMin[0]=u0;o->uvMin[1]=v0;o->uvMax[0]=u1;o->uvMax[1]=v1;
+        }
+    }
 }
 static void XvDrawTriangles(int first,int triangles,int filtering)
 {
@@ -697,6 +746,8 @@ void NativeRenderer_PresentVRAMRect(int x,int y,int w,int h)
         Platform_Log("[vulkan-work] blend-draws=%u,%u,%u,%u,%u ui=%u feedback=%u midpoint-feedback-skips=%u stp-pass-skips=%u\n",
             xvCost.blendDraws[0],xvCost.blendDraws[1],xvCost.blendDraws[2],xvCost.blendDraws[3],xvCost.blendDraws[4],
             xvCost.uiDraws,xvCost.feedbackRequests,xvCost.midpointFeedbackSkips,xvCost.skippedSTPPasses);
+        if(xvCost.gpuFrames)Platform_Log("[vulkan-gpu] frames=%u avg=%.1fms max=%.1fms over16ms=%u\n",
+            xvCost.gpuFrames,xvCost.gpuTotalUS/1000.0/xvCost.gpuFrames,xvCost.gpuMaxUS/1000.0,xvCost.gpuOver16);
         frames=0;lastReport=now;memset(&xvCost,0,sizeof(xvCost));
     }
 }
@@ -737,8 +788,12 @@ static unsigned XvSweepWord(unsigned format,unsigned row,unsigned u,unsigned v)
 }
 static void XvSweepExpected(unsigned format,unsigned filtering,unsigned row,unsigned x,float rgb[3])
 {
-    float u=(x+0.5f)*(format==TF_4_BIT?16.0f:255.0f)/256.0f+1.0f/4096.0f;
+    float span=format==TF_4_BIT?16.0f:255.0f;
+    float u=(x+0.5f)*span/256.0f+1.0f/4096.0f;
     float v=(format==TF_16_BIT?(float)row:0.0f)+1.0f/4096.0f;
+    /* Filtered taps keep inside the strip's texel range, whose U maximum is
+     * exclusive and whose V is constant along the row. */
+    if(filtering){if(u>span-1.0f)u=span-1.0f;v=floorf(v);}
     unsigned tx=(unsigned)floorf(u),ty=(unsigned)floorf(v);
     unsigned nearest=XvSweepWord(format,row,tx,ty);
     rgb[0]=rgb[1]=rgb[2]=0;
@@ -813,7 +868,9 @@ static void XvColorSweep(void)
  * and vertices. Checks 41-44 map every triangle onto a red 64x64 texel square
  * surrounded by transparent texels over a blue background: any blue is a
  * sample outside the triangles' own UVs. 41/42 start at UV 0 (edge clamp);
- * 43/44 start at 64, which no clamp hides, measuring raw UV drift. */
+ * 43/44 start at 64, which no clamp hides, measuring raw UV drift. 45 ends
+ * each filtered range exclusively on opaque blue texels, as PSX data does:
+ * any blue there is filtering blending the next image in the page. */
 static void XvMeshCheck(void)
 {
     enum {COLUMNS=72,ROWS=44,LEFT=102,RIGHT=1178,TOP=69,BOTTOM=651,COUNT=COLUMNS*ROWS*6};
@@ -829,12 +886,12 @@ static void XvMeshCheck(void)
     }
     xv.offscreen=0;xv.drawPrim=1;xv.clipEnabled=0;xv.ui=0;
     xv.state.rect[2]=512;xv.state.rect[3]=216;memset(xv.state.flags,0,sizeof(xv.state.flags));
-    for(unsigned check=40;check<45;check++){
-        unsigned flat=check==40,filtering=check==42 || check==44,base=check>=43?64:0;
+    for(unsigned check=40;check<46;check++){
+        unsigned flat=check==40,filtering=check==42 || check>=44,base=check>=43?64:0,fringe=check==45;
         memset(xv.pixels,0,sizeof(xv.pixels));
-        xv.pixels[480*1024+1]=0x001f;
-        for(unsigned v=base;v<base+64;v++)for(unsigned u=base;u<base+64;u++)
-            xv.pixels[v*1024+512+u/4]|=(u16)(1u<<((u&3)*4));
+        xv.pixels[480*1024+1]=0x001f;xv.pixels[480*1024+2]=0x7c00;
+        for(unsigned v=base;v<base+64+fringe;v++)for(unsigned u=base;u<base+64+fringe;u++)
+            xv.pixels[v*1024+512+u/4]|=(u16)((u<base+64 && v<base+64?1u:2u)<<((u&3)*4));
         seed=0x9e3779b9u;
         for(unsigned cell=0;cell<COLUMNS*ROWS;cell++){
             unsigned col=cell%COLUMNS,row=cell/COLUMNS,corner[4]={row*(COLUMNS+1)+col,row*(COLUMNS+1)+col+1,(row+1)*(COLUMNS+1)+col,(row+1)*(COLUMNS+1)+col+1};
@@ -844,7 +901,7 @@ static void XvMeshCheck(void)
                 unsigned c=order[seed>>31][i];GrVertex *vertex=&vertices[cell*6+i];
                 memset(vertex,0,sizeof(*vertex));
                 vertex->x=gridX[corner[c]];vertex->y=gridY[corner[c]];
-                vertex->u=(u8)(base+(c&1)*63);vertex->v=(u8)(base+(c>>1)*63);
+                vertex->u=(u8)(base+(c&1)*(63+fringe));vertex->v=(u8)(base+(c>>1)*(63+fringe));
                 vertex->page=8;vertex->clut=480*64;vertex->bright=1;
                 vertex->r=vertex->g=vertex->b=flat?64:255;vertex->a=255;
             }
@@ -866,7 +923,7 @@ static void XvMeshCheck(void)
         unsigned char *sample=xv.staging.map+4*(360*xv.main.width+640);
         Platform_Log("[vulkan-check] check=%u format=%u filter=%u wrong=%u/%u sample=%u,%u,%u expected=%u,%u,%u kind=%s blend=%u\n",
             check,0u,filtering,bad,(unsigned)((RIGHT-LEFT)*(BOTTOM-TOP)),sample[0],sample[1],sample[2],flat?64u:255u,flat?64u:0u,flat?64u:0u,
-            flat?"mesh-coverage":base?"uv-drift":"uv-edge",(unsigned)xv.blend);
+            flat?"mesh-coverage":fringe?"uv-fringe":base?"uv-drift":"uv-edge",(unsigned)xv.blend);
         if(bad)Platform_Log("[vulkan-mesh] check=%u first=%u,%u got=%u,%u,%u %s=%u other=%u\n",
             check,firstX,firstY,firstRGB[0],firstRGB[1],firstRGB[2],flat?"gaps":"blue",blue,bad-blue);
     }
@@ -995,6 +1052,7 @@ void NativeRenderer_Shutdown(void)
     for(unsigned i=0;i<4;i++)vkDestroyRenderPass(xv.device,xv.passes[i],NULL);
     for(unsigned i=0;i<2;i++)vkDestroyFence(xv.device,xv.fences[i],NULL);
     vkDestroyFence(xv.device,xv.acquireFence,NULL);vkDestroyCommandPool(xv.device,xv.pool,NULL);
+    if(xv.timestamps)vkDestroyQueryPool(xv.device,xv.timestamps,NULL);
     vkDestroySwapchainKHR(xv.device,xv.swapchain,NULL);vkDestroyDevice(xv.device,NULL);
     vkDestroySurfaceKHR(xv.instance,xv.surface,NULL);vkDestroyInstance(xv.instance,NULL);memset(&xv,0,sizeof(xv));
 }

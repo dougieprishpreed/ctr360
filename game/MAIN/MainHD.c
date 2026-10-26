@@ -55,19 +55,36 @@ static u32 s_hdOTBackup[0x406];
 int g_nativeHDIntermediate;
 int g_nativeHDEnableInterpolation = 1;
 
-static void NativeHD_BindInheritedDepthRanges(struct GameTracker *gGT)
+/* Draw-only copies of the authored frame's other layers, from the current
+ * simulation state. Confetti draws with its update paused; window fades and
+ * the FINAL LAP text draw, then their steps are undone. The UI window's fade
+ * belongs to the HUD replay. */
+static void NativeHD_DrawConfetti(struct GameTracker *gGT)
 {
-    if ((gGT->renderFlags & RENDER_FLAG_EFFECT_BUCKETS) == 0) return;
-    /* These visuals skip their own OT allocation and inherit the queued
-     * owner's depth range. Rebind after every queue, including the midpoint;
-     * a newly spawned boost flame has no valid range from a previous render.
-     * Keep only the render bindings from RenderAllFlag0x40 here. */
-    if (LOAD_IsOpen_RacingOrBattle())
+    int i;
+    if ((gGT->renderFlags & RENDER_FLAG_CONFETTI) == 0) return;
+    for (i = 0; i < gGT->numWinners; i++)
+        DrawConfetti(&gGT->pushBuffer[gGT->winnerIndex[i]], &gGT->backBuffer->primMem, &gGT->confetti, gGT->frameTimer_Confetti, PAUSE_ALL);
+}
+
+static void NativeHD_DrawFades(struct GameTracker *gGT)
+{
+    int i;
+    for (i = 0; i < gGT->numPlyrCurrGame; i++)
     {
-        RB_Burst_ProcessBucket(gGT->threadBuckets[BURST].thread);
-        RB_Blowup_ProcessBucket(gGT->threadBuckets[BLOWUP].thread);
+        struct PushBuffer *pb = &gGT->pushBuffer[i];
+        s16 value = pb->fadeFromBlack_currentValue;
+        PushBuffer_FadeOneWindow(pb);
+        pb->fadeFromBlack_currentValue = value;
     }
-    VehTurbo_ProcessBucket(gGT->threadBuckets[TURBO].thread);
+}
+
+static void NativeHD_DrawFinalLap(struct GameTracker *gGT)
+{
+    u16 timers[4];
+    memcpy(timers, sdata->finalLapTextTimer, sizeof(timers));
+    DrawFinalLap(gGT);
+    memcpy(sdata->finalLapTextTimer, timers, sizeof(timers));
 }
 
 static s16 NativeHD_VecAxis(const SVec3 *v, int axis)
@@ -128,17 +145,22 @@ void NativeHD_RenderIntermediate(struct GameTracker *gGT)
     struct DB savedDB;
     SVec3 currentPosition, currentRotation;
     int count, i, j, canInterpolate;
-    u32 *ot;
+    u32 *ot, rootChain;
     struct Level *level = gGT->level1;
+    /* Every mode flips each second VBlank (RenderSubmit), so a midpoint fits
+     * menus, the hub, cutscenes and results as well as races. Setting 2 keeps
+     * those on the original route, as earlier builds did. */
+    u32 originalRouteModes = LOADING | PAUSE_ALL;
+    if (g_nativeHDEnableInterpolation == 2) originalRouteModes |= MAIN_MENU | GAME_CUTSCENE | ADVENTURE_ARENA | END_OF_RACE;
 
-    /* Loading, menus, split-screen and pause remain on the original route.
+    /* Loading, split-screen and pause remain on the original route.
      * Reset history across transitions and camera cuts to avoid blending
      * unrelated scenes or interpolating a respawn across the course.
      * The checkered flag also stays there while it slides off over the race
      * intro: RaceFlag_GetOT advances its slide when drawn and the flag is not
      * in the HUD replay, so a midpoint would show alternate frames without it. */
     if (!g_nativeHDEnableInterpolation || sdata->Loading.stage != LOAD_IDLE || level == NULL || level->ptr_mesh_info == NULL ||
-        gGT->numPlyrCurrGame != 1 || (gGT->gameMode1 & (LOADING | MAIN_MENU | GAME_CUTSCENE | ADVENTURE_ARENA | PAUSE_ALL | END_OF_RACE)) != 0 ||
+        gGT->numPlyrCurrGame != 1 || (gGT->gameMode1 & originalRouteModes) != 0 ||
         (gGT->renderFlags & (RENDER_FLAG_DRAW_LEVEL | RENDER_FLAG_RENDER_BUCKET | RENDER_FLAG_CHECKERED_FLAG)) != (RENDER_FLAG_DRAW_LEVEL | RENDER_FLAG_RENDER_BUCKET))
     {
         s_hdLevel = NULL;
@@ -175,8 +197,13 @@ void NativeHD_RenderIntermediate(struct GameTracker *gGT)
         ot = gGT->otSwapchainDB[gGT->swapchainIndex];
         memcpy(s_hdOTBackup, ot, sizeof(s_hdOTBackup));
         /* A private render interval uses the already-reset DB and rewinds its
-         * primitive/OT cursors afterwards. GPU uploads copy these packets. */
-        ClearOTagR(ot, 0x406);
+         * primitive/OT cursors afterwards. GPU uploads copy these packets.
+         * Keep what game logic already linked into the world slots and the
+         * root slot (clock blur, lens flare, rescue dust): those draw only
+         * there. The UI slots come from the HUD replay instead, and the root
+         * slot draws after it, as on authored frames. */
+        rootChain = ot[0];
+        ClearOTagR(ot, 6);
         /* Append after any packets created earlier in MainMain. Rewinding
          * their bytes would corrupt the restored OT (notably demo text). */
         for (i = 0; i < 3; i++)
@@ -187,11 +214,13 @@ void NativeHD_RenderIntermediate(struct GameTracker *gGT)
         }
         for (i = 0; i < count; i++)
         {
-            /* Screenspace models (rank digit, fruit and rewards) already
-             * belong to the decoded HUD replay. Their OT lies at the tail
-             * of the world chain; queueing them here draws a second copy
-             * before the normal UI draw environment has been installed. */
-            if ((s_hdCurrent[i].flags & SCREENSPACE_INSTANCE) != 0)
+            /* Screenspace models (rank digit, fruit and rewards) and other
+             * UI-camera models (hint and pause menus) already belong to the
+             * decoded HUD replay. Their OT lies at the tail of the world
+             * chain; queueing them here draws a second copy before the
+             * normal UI draw environment has been installed. */
+            if ((s_hdCurrent[i].flags & SCREENSPACE_INSTANCE) != 0 ||
+                INST_GETIDPP(s_hdCurrent[i].instance)[0].pushBuffer == &gGT->pushBuffer_UI)
             {
                 s_hdCurrent[i].instance->flags |= HIDE_MODEL;
                 continue;
@@ -223,21 +252,34 @@ void NativeHD_RenderIntermediate(struct GameTracker *gGT)
             RedBeaker_RenderRain(&gGT->pushBuffer[0], &gGT->backBuffer->primMem, &gGT->JitPools.rain, 1, PAUSE_ALL);
         if ((gGT->renderFlags & RENDER_FLAG_STARS) != 0 && gGT->stars.numStars != 0)
             RenderStars(&gGT->pushBuffer[0], &gGT->backBuffer->primMem, &gGT->stars, 1);
+        NativeHD_DrawConfetti(gGT);
+        NativeHD_DrawFinalLap(gGT);
         RenderBucket_QueueAllInstances(gGT);
         RenderAllNormalParticles(gGT);
-        NativeHD_BindInheritedDepthRanges(gGT);
+        /* After every queue, including the midpoint: inherited effect depth
+         * ranges (a newly spawned boost flame has none from a previous
+         * render), per-view visibility, warp pad digits, skids, spider webs,
+         * and the title trophy's binding. None of these keep state. */
+        RenderAllFlag0x40(gGT);
+        RenderAllTitleDPP(gGT);
         RenderBucket_ExecuteAllInstances(gGT);
         RenderAllTires(gGT);
         RenderAllShadows(gGT);
         RenderAllHeatParticles(gGT);
+        NativeHD_DrawFades(gGT);
         RenderAllLevelGeometry(gGT, level, level->ptr_mesh_info);
-        NativeHD_DrawCountdown(gGT);
+        if ((gGT->gameMode1 & (GAME_CUTSCENE | ADVENTURE_ARENA | MAIN_MENU)) == 0) NativeHD_DrawCountdown(gGT);
         if ((gGT->renderFlags & RENDER_FLAG_CLEAR_BACK_BUFFER) != 0) CAM_ClearScreen(gGT);
         RenderDispEnv_World(gGT);
         PutDrawEnv(&gGT->backBuffer->drawEnv);
         PutDispEnv(&gGT->db[1 - gGT->swapchainIndex].dispEnv);
         DrawOTag(&gGT->pushBuffer[0].ptrOT[0x3ff]);
         NativeGpu_ReplayHUD();
+        if (rootChain != ot[0])
+        {
+            ot[0] = rootChain;
+            DrawOTag(ot);
+        }
         /* Consume only the first of the retail frame's two VBlanks. The
          * regular RenderVSYNC handles the remainder before the current pose. */
         Platform_WaitUntilVBlank(Platform_GetVBlankCount() + 1);

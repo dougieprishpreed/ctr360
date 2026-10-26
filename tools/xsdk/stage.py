@@ -14,5 +14,5 @@ shutil.copy2(a.xex,a.out/'default.xex');shutil.copy2(cooked,a.out/'assets/ctr-u.
 example=Path(__file__).resolve().parents[2]/'tools/ctr360/ctr360.example.ini'
 shutil.copy2(example,a.out/'ctr360.example.ini')
 if not (a.out/'ctr360.ini').exists():shutil.copy2(example,a.out/'ctr360.ini')
-(a.out/'README.txt').write_text('CTR360 experimental open xSDK / Vulkan build.\nNot yet verified on console. Copy this whole folder to writable USB/HDD.\nBack up saves and keep this folder separate from the regular build.\nLaunch default.xex. Back+Start exits. Preserve memcards/ and ctr360.ini on update.\n')
+(a.out/'README.txt').write_text('CTR360 for Xbox 360, built with the open xSDK and vulkan4xenon.\nCopy this whole folder to writable USB/HDD storage and launch default.xex.\nBack+Start exits. Keep memcards/ and ctr360.ini when updating.\n')
 print(a.out.resolve())

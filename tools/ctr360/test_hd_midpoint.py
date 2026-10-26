@@ -14,8 +14,9 @@ typedef int16_t s16; typedef int32_t s32; typedef int64_t s64;
 typedef struct {s16 x,y,z;} SVec3;
 typedef struct {s16 m[3][3],pad; s32 t[3];} MATRIX;
 struct Model {int identity;};
-struct Instance {struct Instance *next;struct Model *model;MATRIX matrix;u32 flags;};
-struct PushBuffer {SVec3 pos,rot;u32 *ptrOT;int untouched;};
+struct PushBuffer {SVec3 pos,rot;u32 *ptrOT;int untouched;s16 fadeFromBlack_currentValue;};
+struct Instance {struct Instance *next;struct Model *model;MATRIX matrix;u32 flags;struct {struct PushBuffer *pushBuffer;} idpp[1];};
+#define INST_GETIDPP(i) ((i)->idpp)
 struct PrimMem {void *start,*cursor;int count;};
 struct OtMem {void *start,*cursor;};
 struct DB {struct PrimMem primMem;struct OtMem otMem;int drawEnv,dispEnv;};
@@ -25,23 +26,26 @@ enum {BURST, BLOWUP, TURBO};
 enum {SCREENSPACE_INSTANCE=0x400,HIDE_MODEL=0x80};
 struct GameTracker {
  struct Level *level1;int numPlyrCurrGame,gameMode1,renderFlags,swapchainIndex;
- struct PushBuffer pushBuffer[1];struct DB db[2],*backBuffer;u32 *otSwapchainDB[2];
+ struct PushBuffer pushBuffer[1],pushBuffer_UI;struct DB db[2],*backBuffer;u32 *otSwapchainDB[2];
+ int numWinners,winnerIndex[4],confetti,frameTimer_Confetti;
  struct {struct {struct {void *first;} taken;} instance;int rain;} JitPools;
  struct {int numStars;} stars;int rainBuffer[1];
  int raceTimer,elapsedTimeMS,trafficLightsTimer,timer;void *visMem1;
  struct {struct Thread *thread;} threadBuckets[3];
 };
-static struct {struct {int stage;} Loading;} data,*sdata=&data;
+static struct {struct {int stage;} Loading;u16 finalLapTextTimer[4];} data,*sdata=&data;
 enum {LOAD_IDLE=0,LOADING=1,MAIN_MENU=2,GAME_CUTSCENE=4,ADVENTURE_ARENA=8,PAUSE_ALL=16,END_OF_RACE=32};
-enum {RENDER_FLAG_DRAW_LEVEL=1,RENDER_FLAG_RENDER_BUCKET=2,RENDER_FLAG_CLEAR_BACK_BUFFER=4,RENDER_FLAG_EFFECT_BUCKETS=8,RENDER_FLAG_RAIN=16,RENDER_FLAG_BEAKER_RAIN=32,RENDER_FLAG_STARS=64,RENDER_FLAG_CHECKERED_FLAG=128};
+enum {RENDER_FLAG_DRAW_LEVEL=1,RENDER_FLAG_RENDER_BUCKET=2,RENDER_FLAG_CLEAR_BACK_BUFFER=4,RENDER_FLAG_EFFECT_BUCKETS=8,RENDER_FLAG_RAIN=16,RENDER_FLAG_BEAKER_RAIN=32,RENDER_FLAG_STARS=64,RENDER_FLAG_CHECKERED_FLAG=128,RENDER_FLAG_CONFETTI=256};
 static u16 CTR_ReadU16LE(const void*p){const u8*b=p;return b[0]|((u16)b[1]<<8);}
 static void CTR_WriteU16LE(void*p,u16 v){u8*b=p;b[0]=(u8)v;b[1]=(u8)(v>>8);}
 static int renders,vsyncs,captures,hudValid=1;
 static int queuedRange, flameRange, burstRange, blowupRange;
-int LOAD_IsOpen_RacingOrBattle(void){return 1;}
-void RB_Burst_ProcessBucket(struct Thread*t){(void)t;burstRange=queuedRange;}
-void RB_Blowup_ProcessBucket(struct Thread*t){(void)t;blowupRange=queuedRange;}
-void VehTurbo_ProcessBucket(struct Thread*t){(void)t;flameRange=queuedRange;}
+static int flagDraws,titleDraws,confettiDraws,finalLapDraws,fadeDraws,rootDraws,dotLights,cleared;
+void RenderAllFlag0x40(struct GameTracker*g){(void)g;burstRange=blowupRange=flameRange=queuedRange;flagDraws++;}
+void RenderAllTitleDPP(struct GameTracker*g){(void)g;assert(flameRange==queuedRange);titleDraws++;}
+void DrawConfetti(struct PushBuffer*p,struct PrimMem*m,int*c,int timer,int mode){(void)p;(void)m;(void)c;(void)timer;assert(mode==PAUSE_ALL);confettiDraws++;}
+void DrawFinalLap(struct GameTracker*g){(void)g;for(int i=0;i<4;i++)if(sdata->finalLapTextTimer[i])sdata->finalLapTextTimer[i]--;finalLapDraws++;}
+void PushBuffer_FadeOneWindow(struct PushBuffer*p){p->fadeFromBlack_currentValue+=7;fadeDraws++;}
 static struct GameTracker *observedGT;
 static MATRIX observedMatrix;static SVec3 observedCamera;
 void NativeGpu_BeginHUDCapture(void){captures++;}
@@ -50,7 +54,7 @@ void NativeGpu_SetHUDCapture(int enabled){(void)enabled;}
 int NativeGpu_HasHUDCapture(void){return hudValid;}
 void PushBuffer_UpdateFrustum(struct PushBuffer*p){(void)p;}
 void MainFrame_VisMemFullFrame(struct GameTracker*g,struct Level*l){(void)g;(void)l;}
-void ClearOTagR(u32*p,int n){memset(p,0,n*sizeof(u32));}
+void ClearOTagR(u32*p,int n){assert(n==6);cleared++;memset(p,0,n*sizeof(u32));}
 void RenderBucket_QueueAllInstances(struct GameTracker*g){(void)g;queuedRange++;flameRange=burstRange=blowupRange=0;assert((((struct Instance*)g->JitPools.instance.taken.first)->next->flags & HIDE_MODEL)!=0);}
 static int weatherDraws,cloudDraws,starDraws,heatDraws;
 void RenderWeather(struct PushBuffer*p,struct PrimMem*m,int*r,int n,int pause){assert(pause==PAUSE_ALL&&n==1);weatherDraws++;}
@@ -65,10 +69,16 @@ void RenderAllLevelGeometry(struct GameTracker*g,struct Level*l,void*m){(void)g;
 void RenderDispEnv_World(struct GameTracker*g){(void)g;}
 void CAM_ClearScreen(struct GameTracker*g){(void)g;}
 void CTR_CycleTex_LEV(void*t,int timer){(void)t;(void)timer;}
-void DotLights_Video(struct GameTracker*g,s32 r1,s32 r2,s32 r3,s32 green,s32 y){(void)g;assert(r1==1&&r2==1&&r3==1&&green==1);assert(y==4096);}
+void DotLights_Video(struct GameTracker*g,s32 r1,s32 r2,s32 r3,s32 green,s32 y){assert((g->gameMode1&ADVENTURE_ARENA)==0);assert(r1==1&&r2==1&&r3==1&&green==1);assert(y==4096);dotLights++;}
 void PutDrawEnv(int*p){(void)p;}
 void PutDispEnv(int*p){(void)p;}
-void DrawOTag(u32*p){(void)p;assert((uintptr_t)observedGT->backBuffer->primMem.cursor==(uintptr_t)observedGT->backBuffer->primMem.start+12);renders++;observedCamera=observedGT->pushBuffer[0].pos;observedMatrix=((struct Instance*)observedGT->JitPools.instance.taken.first)->matrix;}
+void DrawOTag(u32*p){
+ u32 *ot=observedGT->otSwapchainDB[0];
+ /* Root slot after the HUD replay: game logic's chain, put back. */
+ if(p==ot){assert(ot[0]==0x12345600);rootDraws++;return;}
+ /* World walk: game-logic world slots kept, UI and root slots reset. */
+ for(int i=0;i<6;i++)assert(ot[i]==0);for(int i=6;i<0x406;i++)assert(ot[i]==0x12345600u+i);
+ assert((uintptr_t)observedGT->backBuffer->primMem.cursor==(uintptr_t)observedGT->backBuffer->primMem.start+12);renders++;observedCamera=observedGT->pushBuffer[0].pos;observedMatrix=((struct Instance*)observedGT->JitPools.instance.taken.first)->matrix;}
 void Platform_WaitUntilVBlank(int n){vsyncs=n;}
 int Platform_GetVBlankCount(void){return vsyncs;}
 void DrawSync(int n){(void)n;}
@@ -89,14 +99,18 @@ int main(void){
  assert(NativeHD_AngleMidpoint(4090,6)==0);assert(NativeHD_AngleMidpoint(6,4090)==0);
  g.level1=&level;g.numPlyrCurrGame=1;g.renderFlags=127;g.stars.numStars=12;g.backBuffer=&g.db[0];g.otSwapchainDB[0]=ot;g.pushBuffer[0].ptrOT=ot+6;
  g.db[0].primMem.start=prim;g.db[0].primMem.cursor=prim+12;g.db[0].otMem.start=mem;g.db[0].otMem.cursor=mem+24;
- g.JitPools.instance.taken.first=&inst;inst.next=&hud;hud.model=&model;hud.flags=SCREENSPACE_INSTANCE;hud.matrix.t[0]=123;inst.model=&model;inst.matrix=b;inst.matrix.t[0]=100;inst.matrix.t[1]=200;inst.matrix.t[2]=300;
+ struct Instance hint={0};g.JitPools.instance.taken.first=&inst;inst.next=&hud;hud.next=&hint;hint.model=&model;hint.idpp[0].pushBuffer=&g.pushBuffer_UI;
+ hud.model=&model;hud.flags=SCREENSPACE_INSTANCE;hud.matrix.t[0]=123;inst.model=&model;inst.matrix=b;inst.matrix.t[0]=100;inst.matrix.t[1]=200;inst.matrix.t[2]=300;
+ g.renderFlags|=RENDER_FLAG_CONFETTI;g.numWinners=1;g.pushBuffer[0].fadeFromBlack_currentValue=0x800;sdata->finalLapTextTimer[0]=50;
  g.raceTimer=76543;g.elapsedTimeMS=32;observedGT=&g;
  for(i=0;i<0x406;i++)ot[i]=0x12345600+i;
  NativeHD_RenderIntermediate(&g);assert(renders==0);
  g.pushBuffer[0].pos.x=100;inst.matrix.t[0]=120;
  before=g;matrixBefore=inst.matrix;memcpy(otBefore,ot,sizeof ot);
  NativeHD_RenderIntermediate(&g);
- assert(weatherDraws==1 && cloudDraws==1 && starDraws==1 && heatDraws==1);
+ assert(weatherDraws==1 && cloudDraws==1 && starDraws==1 && heatDraws==1 && flagDraws==1 && titleDraws==1 && rootDraws==1 && cleared==1);
+ assert(confettiDraws==1 && finalLapDraws==1 && fadeDraws==1 && dotLights==1);
+ assert(sdata->finalLapTextTimer[0]==50 && g.pushBuffer[0].fadeFromBlack_currentValue==0x800 && hint.flags==0);
  assert(renders==1 && vsyncs==1 && observedCamera.x==50 && observedMatrix.t[0]==110);
  assert(memcmp(&g,&before,sizeof g)==0 && memcmp(&inst.matrix,&matrixBefore,sizeof matrixBefore)==0 && memcmp(ot,otBefore,sizeof ot)==0);
  assert(g.raceTimer==76543 && g.elapsedTimeMS==32 && inst.flags==0 && hud.flags==SCREENSPACE_INSTANCE && hud.matrix.t[0]==123);
@@ -105,6 +119,12 @@ int main(void){
  g.pushBuffer[0].pos.x+=1500;NativeHD_RenderIntermediate(&g);assert(renders==r);
  g.numPlyrCurrGame=2;NativeHD_RenderIntermediate(&g);assert(renders==r);
  g.numPlyrCurrGame=1;g.renderFlags|=RENDER_FLAG_CHECKERED_FLAG;NativeHD_RenderIntermediate(&g);assert(renders==r);
+ /* The hub, menus, cutscenes and results interpolate too, without the
+  * countdown lights; setting 2 keeps them on the original route. */
+ g.renderFlags&=~RENDER_FLAG_CHECKERED_FLAG;g.gameMode1=ADVENTURE_ARENA;i=dotLights;
+ NativeHD_RenderIntermediate(&g);NativeHD_RenderIntermediate(&g);assert(renders==r+1 && dotLights==i);
+ g_nativeHDEnableInterpolation=2;NativeHD_RenderIntermediate(&g);assert(renders==r+1);
+ g.gameMode1=0;NativeHD_RenderIntermediate(&g);NativeHD_RenderIntermediate(&g);assert(renders==r+2);g_nativeHDEnableInterpolation=1;
  /* Indexed lookup preserves identities across reordered lists and collisions. */
  struct Instance many[512];struct Model otherModel={2};
  s_hdPoseCount=512;
@@ -113,7 +133,7 @@ int main(void){
  for(i=0;i<512;i++){assert(NativeHD_FindPreviousPose(&many[i],&model)==511-i);assert(NativeHD_FindPreviousPose(&many[i],&otherModel)==-1);}
  assert(NativeHD_FindPreviousPose(&inst,&model)==-1);
  assert(416+720+720==1856 && 1856<=2048);
- puts("PASS actual HD midpoint: LE rotation/native translation, wrapped angles, fresh boost/explosion depth bindings before dispatch, one HUD copy with screenspace flags restored, pose/DB/OT/timer restoration, draw-only weather/cloud/star/heat paths, 512 indexed identities and model changes, pause/level/camera-cut/split-screen/checkered-flag guards; EDRAM 1856/2048 tiles");
+ puts("PASS actual HD midpoint: LE rotation/native translation, wrapped angles, fresh boost/explosion depth bindings before dispatch, one HUD copy with screenspace flags restored, pose/DB/OT/timer restoration, draw-only weather/cloud/star/heat paths, 512 indexed identities and model changes, pause/level/camera-cut/split-screen/checkered-flag guards, hub interpolation with setting 1 only, kept game-logic world/root slots with the root after the HUD, hidden UI-camera models, paused confetti and undone fade/final-lap steps; EDRAM 1856/2048 tiles");
  return 0;
 }
 '''

@@ -233,7 +233,7 @@ void UI_Weapon_DrawBG(s16 posX, s16 posY, s16 scale, struct Driver *d)
 	}
 
 #ifdef _XBOX
-	PushBuffer_SetDrawEnv_HUDLayer(ot, &gGT->pushBuffer[d->driverID], gGT->backBuffer);
+	PushBuffer_SetDrawEnv_Pass(ot, &gGT->pushBuffer[d->driverID], gGT->backBuffer, 1);
 #endif
 
 	return;

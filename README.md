@@ -118,15 +118,17 @@ Edit `ctr360.ini` beside `default.xex` to change graphics and controller binding
 interpolation = 1
 texture_filter = 1
 edge_aa = 1
+widescreen = 1
 ```
 
 Missing or invalid settings keep their defaults.
 
-- `interpolation`: `1` renders intermediate poses for 60 FPS throughout single-player play, `2` only in races, and `0` renders at 30 FPS. Game logic and timers keep their original rate either way; 720p and widescreen stay enabled.
+- `interpolation`: `1` renders intermediate poses for 60 FPS throughout single-player play, `2` only in races, and `0` renders at 30 FPS. Game logic and timers keep their original rate either way; 720p stays enabled.
 - `texture_filter`: `1` smooths world textures, `0` keeps them sharp.
 - `edge_aa`: `1` smooths polygon edges, `0` turns this off.
+- `widescreen`: `1` shows more of each course in 16:9, `0` keeps the original 4:3 view. On a widescreen TV, 4:3 is shown with black bars at the sides; on a 4:3 TV it fills the screen.
 
-Frame rate varies with the scene. To reduce graphics cost, try `edge_aa = 0`, then `texture_filter = 0`. Texture filtering improves sampling; it does not replace the original textures with higher-detail artwork. World geometry uses an expanded 16:9 projection; the original HUD and menu layout keep their authored proportions.
+Frame rate varies with the scene. To reduce graphics cost, try `edge_aa = 0`, then `texture_filter = 0`. Texture filtering improves sampling; it does not replace the original textures with higher-detail artwork. In widescreen, world geometry uses an expanded 16:9 projection; the original HUD and menu layout keep their authored proportions, and in three- and four-player races each player's HUD reaches the outer edges of their view.
 
 The `[controls]` section maps original PlayStation buttons to Xbox controls for all controllers. For example, `cross = RT` moves accelerate/confirm to the right trigger, and `r2 = A` moves R2 to A. Available buttons are `A B X Y LB RB LT RT LS RS START BACK DPAD_UP DPAD_DOWN DPAD_LEFT DPAD_RIGHT NONE`. Stick axes use `LEFT_X LEFT_Y RIGHT_X RIGHT_Y`; prefix an axis with `-` to invert it. The supplied example lists every destination and default. Names are case sensitive. The **Back + Start** exit shortcut stays active regardless of remapping.
 

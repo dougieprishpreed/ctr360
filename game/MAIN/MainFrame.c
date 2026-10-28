@@ -260,14 +260,12 @@ void MainFrame_GameLogic(struct GameTracker *gGT, struct GamepadSystem *gGamepad
 	int iVar11;
 	struct Thread *psVar12;
 	MainFrame_TraceIntroStep("game-enter", -1);
-	{ static int s_g1 = 0; if ((((gGT->gameMode1) & GAME_MODE_MENU_OR_CUTSCENE_MASK) != 0) && (((gGT->gameMode1) & 0x40000000) == 0)) { s_g1++; if (s_g1 < 400) { Platform_Log("[probe] g1m f=%d mode1=%08x\n", (int)sdata->frameCounter, (unsigned)gGT->gameMode1); } } else if ((sdata->frameCounter % 60) == 0) { Platform_Log("[probe] g1 f=%d\n", (int)sdata->frameCounter); } }
 
 	wasPausedAtFrameStart = true;
 	if ((gGT->gameMode1 & PAUSE_ALL) == 0)
 	{
 		wasPausedAtFrameStart = false;
 		pushBuffer = gGT->pushBuffer;
-		{ static int s_pa = 0; if ((((gGT->gameMode1) & 0x2000) != 0) && (((gGT->gameMode1) & 0x40000000) == 0)) { s_pa++; if (s_pa < 400) { Platform_Log("[probe] pa f=%d \n", (int)sdata->frameCounter); } } }
 		for (psVar12 = gGT->threadBuckets[0].thread; psVar12 != 0; psVar12 = psVar12->siblingThread)
 		{
 			psVar9 = (struct Driver *)psVar12->object;
@@ -314,14 +312,11 @@ void MainFrame_GameLogic(struct GameTracker *gGT, struct GamepadSystem *gGamepad
 		LAB_80034e74:
 			pushBuffer = pushBuffer + 1;
 		}
-		{ static int s_pd = 0; if ((((gGT->gameMode1) & 0x2000) != 0) && (((gGT->gameMode1) & 0x40000000) == 0)) { s_pd++; if (s_pd < 400) { Platform_Log("[probe] pd f=%d \n", (int)sdata->frameCounter); } } }
 		gGT->timer = gGT->timer + 1;
 		gGT->framesInThisLEV = gGT->framesInThisLEV + 1;
 		gGT->unk1cc4[4] = 0;
-		{ static int s_pe = 0; if ((((gGT->gameMode1) & 0x2000) != 0) && (((gGT->gameMode1) & 0x40000000) == 0)) { s_pe++; if (s_pe < 400) { Platform_Log("[probe] pe f=%d \n", (int)sdata->frameCounter); } } }
 
 		iVar4 = Timer_GetTime_Elapsed(gGT->clockFrameStart, &gGT->clockFrameStart);
-		{ static int s_pf = 0; if ((((gGT->gameMode1) & 0x2000) != 0) && (((gGT->gameMode1) & 0x40000000) == 0)) { s_pf++; if (s_pf < 400) { Platform_Log("[probe] pf f=%d iVar4=%d\n", (int)sdata->frameCounter, (int)iVar4); } } }
 		iVar4 = (iVar4 << 5) / 100;
 
 		gGT->elapsedTimeMS = iVar4;
@@ -388,10 +383,8 @@ void MainFrame_GameLogic(struct GameTracker *gGT, struct GamepadSystem *gGamepad
 
 		MainFrame_TraceIntroStep("cycle-player", -1);
 		CTR_CycleTex_AllModels(-1, (struct Model **)sdata->PLYROBJECTLIST, gGT->timer);
-		{ static int s_pg = 0; if ((((gGT->gameMode1) & 0x2000) != 0) && (((gGT->gameMode1) & 0x40000000) == 0)) { s_pg++; if (s_pg < 400) { Platform_Log("[probe] pg f=%d plyrlist=%08x\n", (int)sdata->frameCounter, (unsigned)(u32)sdata->PLYROBJECTLIST); } } }
 		MainFrame_TraceIntroStep("cycle-level", -1);
 		CTR_CycleTex_AllModels(gGT->level1->numModels, gGT->level1->ptrModelsPtrArray, gGT->timer);
-		{ static int s_g2 = 0; if ((((gGT->gameMode1) & GAME_MODE_MENU_OR_CUTSCENE_MASK) != 0) && (((gGT->gameMode1) & 0x40000000) == 0)) { s_g2++; if (s_g2 < 400) { Platform_Log("[probe] g2m f=%d lvl1=%08x numModels=%d arr=%08x\n", (int)sdata->frameCounter, (unsigned)(u32)gGT->level1, (int)((gGT->level1 != NULL) ? gGT->level1->numModels : -999), (unsigned)(u32)((gGT->level1 != NULL) ? (u32)gGT->level1->ptrModelsPtrArray : 0)); } } }
 
 		psVar8 = 0;
 		psVar9 = 0;
@@ -426,13 +419,11 @@ void MainFrame_GameLogic(struct GameTracker *gGT, struct GamepadSystem *gGamepad
 		}
 #endif
 
-		{ static int s_g3 = 0; if ((((gGT->gameMode1) & GAME_MODE_MENU_OR_CUTSCENE_MASK) != 0) && (((gGT->gameMode1) & 0x40000000) == 0)) { s_g3++; if (s_g3 < 400) { Platform_Log("[probe] g3m f=%d\n", (int)sdata->frameCounter); } } }
 		if (((psVar8 != 0) && (psVar9 != 0)) && (iVar4 = (u32)psVar9->numTimesAttacking - (u32)psVar8->numTimesAttacking, psVar8->quip2 < iVar4))
 		{
 			psVar8->quip2 = (s16)iVar4;
 		}
 
-		{ static int s_g4 = 0; if ((((gGT->gameMode1) & GAME_MODE_MENU_OR_CUTSCENE_MASK) != 0) && (((gGT->gameMode1) & 0x40000000) == 0)) { s_g4++; if (s_g4 < 400) { Platform_Log("[probe] g4m f=%d\n", (int)sdata->frameCounter); } } }
 		for (iVar4 = 0; iVar4 < PAUSE; iVar4++)
 		{
 			if ((((gGT->gameMode1 & DEBUG_MENU) == 0) || ((gGT->threadBuckets[iVar4].boolCantPause & 1) != 0)) &&
@@ -479,7 +470,6 @@ void MainFrame_GameLogic(struct GameTracker *gGT, struct GamepadSystem *gGamepad
 			}
 		}
 
-		{ static int s_g5 = 0; if ((((gGT->gameMode1) & GAME_MODE_MENU_OR_CUTSCENE_MASK) != 0) && (((gGT->gameMode1) & 0x40000000) == 0)) { s_g5++; if (s_g5 < 400) { Platform_Log("[probe] g5m f=%d\n", (int)sdata->frameCounter); } } }
 #if defined(CTR_NATIVE)
 		MainFrame_TraceIntroStep("bots-enter", -1);
 		BOTS_UpdateGlobals();
@@ -520,7 +510,6 @@ void MainFrame_GameLogic(struct GameTracker *gGT, struct GamepadSystem *gGamepad
 	}
 
 	PROC_CheckAllForDead();
-	{ static int s_g6 = 0; if ((((gGT->gameMode1) & GAME_MODE_MENU_OR_CUTSCENE_MASK) != 0) && (((gGT->gameMode1) & 0x40000000) == 0)) { s_g6++; if (s_g6 < 400) { Platform_Log("[probe] g6m f=%d\n", (int)sdata->frameCounter); } } }
 
 	if ((gGT->gameMode1 & PAUSE_ALL) == 0)
 	{
@@ -532,7 +521,6 @@ void MainFrame_GameLogic(struct GameTracker *gGT, struct GamepadSystem *gGamepad
 	gGT->gameMode1_prevFrame = gGT->gameMode1;
 	uVar5 = GAMEPAD_GetNumConnected(gGamepads);
 	MainFrame_TraceIntroStep("pad-exit", -1);
-	{ static int s_g7 = 0; if ((((gGT->gameMode1) & GAME_MODE_MENU_OR_CUTSCENE_MASK) != 0) && (((gGT->gameMode1) & 0x40000000) == 0)) { s_g7++; if (s_g7 < 400) { Platform_Log("[probe] g7m f=%d\n", (int)sdata->frameCounter); } } }
 	uVar3 = gGT->gameMode1;
 
 	if ((uVar3 & END_OF_RACE) == 0)

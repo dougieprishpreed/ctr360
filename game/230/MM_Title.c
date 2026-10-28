@@ -11,7 +11,6 @@ void MM_Title_MenuUpdate(void)
 	register MainMenuState *mainMenuState CTR_PSX_REGISTER("$2");
 	register MainMenuState scrapbookState CTR_PSX_REGISTER("$3");
 
-	{ static int s_mu = 0; if ((s_mu++ % 30) == 0) { Platform_Log("[probe] title-menu state=%d tframe=%d intro=%d\n", (int)MM_TITLE_MENU_STATE, (int)MM_TITLE_MENU_TRANSITION_FRAME, (int)MM_TITLE_INTRO_FRAME); } }
 	// 0 - watching Crash + C-T-R letters animation
 	// 1 - in the main menu
 	// 2 - leaving main menu
@@ -566,7 +565,6 @@ void MM_Title_Init(void)
 	register u32 introFramePage CTR_PSX_REGISTER("$4");
 #endif
 
-	{ static int s_ti = 0; if ((s_ti++ % 30) == 0) { Platform_Log("[probe] title-init obj=%08x mode1=%08x mstate=%d ring=%08x lvl1=%08x st1=%d\n", (unsigned)(u32)MM_TITLE_OBJECT, (unsigned)GAME_TRACKER->gameMode1, (int)MM_TITLE_MENU_STATE, (unsigned)(u32)GAME_TRACKER->modelPtr[STATIC_RINGTOP], (unsigned)(u32)GAME_TRACKER->level1, (int)((GAME_TRACKER->level1 != NULL && GAME_TRACKER->level1->ptrSpawnType1 != NULL) ? (int)GAME_TRACKER->level1->ptrSpawnType1->count : -1)); } }
 	if (
 	    // if "title" object is nullptr
 	    (MM_TITLE_OBJECT == NULL) &&

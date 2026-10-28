@@ -20,6 +20,7 @@ def main():
     palette = source[source.index('/* CPU palette summaries'):source.index('static void XvCheck(')]
     setters = source[source.index('void NativeRenderer_SetTexture('):source.index('void NativeRenderer_UpdateVertexBuffer(')]
     draw = source[source.index('static void XvDrawTriangles('):source.index('static int XvValidRect(')]
+    clipMode = source[source.index('void NativeRenderer_SetupClipMode('):source.index('void NativeRenderer_SetBlendMode(')]
     harness = r'''
 #include <vulkan/vulkan.h>
 #include <assert.h>
@@ -32,6 +33,7 @@ typedef struct {int16_t clut;} GrVertex;
 typedef enum {TF_4_BIT,TF_8_BIT,TF_16_BIT,TF_32_BIT_RGBA} TexFormat;
 typedef enum {BM_NONE,BM_AVERAGE,BM_ADD,BM_SUBTRACT,BM_ADD_QUATER_SOURCE} BlendMode;
 typedef struct {int x,y,w,h;} RECT16;
+typedef struct {RECT16 disp;int isinter;} DISPENV;
 typedef struct {float rect[4],scale[4],flags[4],source[4];} XvUniform;
 typedef struct {int pass;} XvTarget;
 static struct {
@@ -44,22 +46,24 @@ static struct {
 } xv;
 static struct {unsigned draws,shaderDraws[7],blendDraws[5],uiDraws,skippedSTPPasses;} xvCost;
 static int g_dbg_texturelessMode,g_cfg_bilinearFiltering=1;
+static int g_nativeHDWidescreen=1;static float xvSqueeze=1;static VkRect2D xvPicture={{0,0},{XV_WIDTH,XV_HEIGHT}};
+static VkRect2D scissorSeen;static float scaleSeen;
 static unsigned selected,stencil,bound,draws,firstSeen,countSeen;
 static XvTarget *targetSeen;
 static void NativeRenderer_UpdateVRAM(void){}
 static void XvLayout(XvTarget *target,VkImageLayout layout){}
 static void XvPass(XvTarget *target){targetSeen=target;}
 static void XvReserveUniform(void){}
-static void XvBindUniform(const XvUniform *s,unsigned texture){assert(texture==0);}
+static void XvBindUniform(const XvUniform *s,unsigned texture){assert(texture==0);scaleSeen=s->scale[0];}
 static VkPipeline XvPipeline(unsigned pass,int shader,BlendMode blend,int mask){
  selected=shader;stencil=mask;assert(blend==xv.blend);return (VkPipeline)(uintptr_t)(shader+1);
 }
 void vkCmdSetViewport(VkCommandBuffer c,uint32_t f,uint32_t n,const VkViewport *v){}
-void vkCmdSetScissor(VkCommandBuffer c,uint32_t f,uint32_t n,const VkRect2D *v){}
+void vkCmdSetScissor(VkCommandBuffer c,uint32_t f,uint32_t n,const VkRect2D *v){scissorSeen=*v;}
 void vkCmdBindPipeline(VkCommandBuffer c,VkPipelineBindPoint p,VkPipeline v){bound=(unsigned)(uintptr_t)v-1;}
 void vkCmdBindVertexBuffers(VkCommandBuffer c,uint32_t f,uint32_t n,const VkBuffer *b,const VkDeviceSize *o){assert(*o==xv.vertexBase);}
 void vkCmdDraw(VkCommandBuffer c,uint32_t n,uint32_t i,uint32_t f,uint32_t fi){draws++;firstSeen=f;countSeen=n;assert(i==1 && fi==0);}
-'''+palette+setters+draw+r'''
+'''+palette+setters+clipMode+draw+r'''
 static void twoPasses(unsigned expected){
  unsigned before=draws;
  xv.state.flags[0]=1;XvDrawTriangles(0,2,1);
@@ -120,7 +124,26 @@ int main(void){
  xv.pixels[511*1024+1008]=32768;XvPaletteReset();twoPasses(1);
  assert(XvTexturePassNeeded(0,2)); // Last pass (STP) now has a visible texel.
  xvPalette.generation=~0u;XvPaletteReset();assert(xvPalette.generation==1);twoPasses(1);
+ /* Widescreen squeezes the authored HUD into the middle 4:3; widescreen = 0 squeezes
+  * everything into the 960-pixel picture on a wide output, nothing on a 4:3 one. */
+ xv.state.flags[0]=0;xv.clipEnabled=0;xv.offscreen=0;
+ xv.ui=1;XvDrawTriangles(0,2,0);assert(scaleSeen==0.75f && scissorSeen.offset.x==0 && scissorSeen.extent.width==XV_WIDTH);
+ xv.ui=0;XvDrawTriangles(0,2,0);assert(scaleSeen==1);
+ g_nativeHDWidescreen=0;xvSqueeze=0.75f;xvPicture=(VkRect2D){{160,0},{960,XV_HEIGHT}};
+ xv.ui=1;XvDrawTriangles(0,2,0);assert(scaleSeen==0.75f && scissorSeen.offset.x==160 && scissorSeen.extent.width==960);
+ xv.ui=0;XvDrawTriangles(0,2,0);assert(scaleSeen==0.75f && scissorSeen.offset.x==160 && scissorSeen.extent.width==960);
+ xv.offscreen=1;XvDrawTriangles(0,2,0);assert(scaleSeen==1 && scissorSeen.offset.x==0 && scissorSeen.extent.width==32);xv.offscreen=0;
+ xvSqueeze=1;xvPicture=(VkRect2D){{0,0},{XV_WIDTH,XV_HEIGHT}};
+ xv.ui=1;XvDrawTriangles(0,2,0);assert(scaleSeen==1 && scissorSeen.extent.width==XV_WIDTH);
+ /* A 3/4-player viewport clips widescreen HUD art to its own 16:9 quarter, where the
+  * outer elements now sit; 4:3 clips to that quarter of the picture. */
+ DISPENV display={{0,0,512,216},0};RECT16 quarter={0,0,253,106};
+ g_nativeHDWidescreen=1;NativeRenderer_SetupClipMode(&quarter,&display,1);XvDrawTriangles(0,2,0);
+ assert(xv.clipEnabled && scissorSeen.offset.x==0 && scissorSeen.extent.width==632 && scissorSeen.extent.height==353);
+ g_nativeHDWidescreen=0;xvSqueeze=0.75f;NativeRenderer_SetupClipMode(&quarter,&display,1);XvDrawTriangles(0,2,0);
+ assert(scissorSeen.offset.x==160 && scissorSeen.extent.width==474);
  printf("PASS: %u actual draw-routing cases; flat/textured/debug, inherited tpage, filter, UI/offscreen, stencil, bounds\n",cases);
+ puts("PASS: widescreen HUD squeeze and viewport clips; 4:3 picture squeeze and clips on wide and 4:3 outputs");
  puts("PASS: actual STP draw skipping; opaque/STP/mixed/zero palettes, 4/8-bit wrap, GPU overlap, CPU invalidation, mixed CLUTs and generation rollover");
 }
 '''
@@ -147,6 +170,11 @@ int main(void){
     negative = run(harness.replace(invalidation,'(void)0;'), 'palette-invalidation-negative')
     assert negative.returncode, 'negative control missed stale GPU-written palette'
     print('PASS: using stale CPU palettes after a GPU write rejected')
+    squeezedClip = 'float sx=xvSqueeze;'
+    assert squeezedClip in harness
+    negative = run(harness.replace(squeezedClip, 'float sx=xv.ui?0.75f:1.0f;'), 'viewport-clip-negative')
+    assert negative.returncode, 'negative control missed HUD clips squeezed into the 4:3 middle'
+    print('PASS: clipping widescreen 3/4-player HUD art to the squeezed 4:3 middle rejected')
 
 
 if __name__ == '__main__':

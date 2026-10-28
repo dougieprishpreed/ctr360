@@ -329,7 +329,6 @@ u32 main(void)
 
 			// frame counter, not represented in common.h currently
 			sdata->frameCounter++;
-			{ static int s_hb = 0; if ((((gGT->gameMode1) & GAME_MODE_MENU_OR_CUTSCENE_MASK) != 0) && (((gGT->gameMode1) & 0x40000000) == 0)) { s_hb++; if (s_hb < 400) { Platform_Log("[probe] hbm f=%d ms=%d state=%d stage=%d mode1=%08x lvl=%d\n", (int)sdata->frameCounter, (int)gGT->elapsedTimeMS, (int)sdata->mainGameState, (int)sdata->Loading.stage, (unsigned)gGT->gameMode1, (int)gGT->levelID); } } else if ((sdata->frameCounter % 30) == 0) { Platform_Log("[probe] hb f=%d ms=%d state=%d stage=%d mode1=%08x lvl=%d\n", (int)sdata->frameCounter, (int)gGT->elapsedTimeMS, (int)sdata->mainGameState, (int)sdata->Loading.stage, (unsigned)gGT->gameMode1, (int)gGT->levelID); } }
 
 			// Process all gamepad input
 #if defined(CTR_NATIVE) && defined(CTR_INTERNAL)
@@ -354,7 +353,6 @@ u32 main(void)
 
 			// Start new frame (ClearOTagR)
 			MainFrame_ResetDB(gGT);
-			{ static int s_l1 = 0; if ((((gGT->gameMode1) & 0x2000) != 0) && (((gGT->gameMode1) & 0x40000000) == 0)) { s_l1++; if (s_l1 < 400) { Platform_Log("[probe] l1m f=%d\n", (int)sdata->frameCounter); } } else if ((sdata->frameCounter % 60) == 0) { Platform_Log("[probe] l1 f=%d\n", (int)sdata->frameCounter); } }
 
 			if (
 			    // If you're in Demo Mode
@@ -418,9 +416,7 @@ u32 main(void)
 #if defined(CTR_NATIVE) && defined(CTR_INTERNAL)
 				NativePerf_BeginScope(NATIVE_PERF_BUCKET_GAME_LOGIC);
 #endif
-				{ static int s_l2 = 0; if ((((gGT->gameMode1) & 0x2000) != 0) && (((gGT->gameMode1) & 0x40000000) == 0)) { s_l2++; if (s_l2 < 400) { Platform_Log("[probe] l2m f=%d mode1=%08x\n", (int)sdata->frameCounter, (unsigned)gGT->gameMode1); } } else if ((sdata->frameCounter % 60) == 0) { Platform_Log("[probe] l2 f=%d mode1=%08x\n", (int)sdata->frameCounter, (unsigned)gGT->gameMode1); } }
 				MainFrame_GameLogic(gGT, gGS);
-				{ static int s_l3 = 0; if ((((gGT->gameMode1) & 0x2000) != 0) && (((gGT->gameMode1) & 0x40000000) == 0)) { s_l3++; if (s_l3 < 400) { Platform_Log("[probe] l3m f=%d mode1=%08x\n", (int)sdata->frameCounter, (unsigned)gGT->gameMode1); } } else if ((sdata->frameCounter % 60) == 0) { Platform_Log("[probe] l3 f=%d mode1=%08x\n", (int)sdata->frameCounter, (unsigned)gGT->gameMode1); } }
 #if defined(CTR_NATIVE) && defined(CTR_INTERNAL)
 				NativePerf_EndScope(NATIVE_PERF_BUCKET_GAME_LOGIC);
 #endif
@@ -446,9 +442,7 @@ u32 main(void)
 #if defined(CTR_NATIVE) && defined(CTR_INTERNAL)
 			NativePerf_BeginScope(NATIVE_PERF_BUCKET_RENDER_FRAME);
 #endif
-			{ static int s_re = 0; if ((s_re++ % 30) == 0) { Platform_Log("[probe] render-enter f=%d\n", (int)sdata->frameCounter); } }
 			MainFrame_RenderFrame(gGT, gGS);
-			{ static int s_rx = 0; if ((s_rx++ % 30) == 0) { Platform_Log("[probe] render-exit f=%d\n", (int)sdata->frameCounter); } }
 #if defined(CTR_NATIVE) && defined(CTR_INTERNAL)
 			NativePerf_EndScope(NATIVE_PERF_BUCKET_RENDER_FRAME);
 #endif

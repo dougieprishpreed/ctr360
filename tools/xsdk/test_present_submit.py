@@ -16,17 +16,26 @@ c=r'''
 #include <string.h>
 enum {XV_WIDTH=1280,XV_HEIGHT=720};
 typedef struct {int id;} XvTarget;
-static struct {VkDevice device;VkSwapchainKHR swapchain;VkQueue queue;VkFence fence,acquireFence;XvTarget main,vram,swap[3];int mainResolved;} xv;
+static struct {VkDevice device;VkSwapchainKHR swapchain;VkQueue queue;VkFence fence,acquireFence;VkCommandBuffer command;XvTarget main,vram,swap[3];int mainResolved;} xv;
+static VkRect2D xvPicture={{0,0},{XV_WIDTH,XV_HEIGHT}};
+typedef struct {uint32_t drawn_back,clear_resolves,resolves_put_off,late_resolves;} V4xEdramCounts;
+static V4xEdramCounts v4x_edram_counts(void){V4xEdramCounts c={0};return c;}
+static int quadX,quadW,bars;
 static struct {unsigned submits,uploads,reads,draws,passes,shaderDraws[7],quads[4];unsigned submitMS,waitMS,frameWaitMS,acquireMS,presentMS;unsigned blendDraws[5],uiDraws,feedbackRequests,midpointFeedbackSkips,skippedSTPPasses;unsigned gpuFrames,gpuTotalUS,gpuMaxUS,gpuOver16;} xvCost;
 static int xvEdgeAA=1;
 static unsigned phase,submits,quads,modeSeen;
+void vkCmdClearAttachments(VkCommandBuffer c,uint32_t n,const VkClearAttachment *at,uint32_t rn,const VkClearRect *r){
+ assert(phase==4 && n==1 && at->clearValue.color.float32[0]==0 && rn==2);
+ assert(r[0].rect.offset.x==0 && r[0].rect.extent.width==(unsigned)quadX && r[1].rect.offset.x==quadX+quadW && r[1].rect.extent.width==(unsigned)(XV_WIDTH-quadX-quadW));
+ bars++;
+}
 #define XV_CALL(x) assert((x)==VK_SUCCESS)
 static unsigned GetTickCount(void){return 1;}
 static void Platform_Log(const char *format,...){}
 static void NativeRenderer_UpdateVRAM(void){}
 static void XvSubmit(void){assert(0);}
 static void XvSubmitFrame(void){assert(phase==4);phase=5;submits++;xvCost.submits++;}
-static void XvQuad(XvTarget *to,XvTarget *from,int mode,int x,int y,int w,int h,float sx,float sy,float sw,float sh){assert(phase==3 && to==&xv.swap[1]);assert(from==(xv.mainResolved?&xv.main:&xv.vram));modeSeen=mode;quads++;phase=4;}
+static void XvQuad(XvTarget *to,XvTarget *from,int mode,int x,int y,int w,int h,float sx,float sy,float sw,float sh){assert(phase==3 && to==&xv.swap[1]);assert(from==(xv.mainResolved?&xv.main:&xv.vram));modeSeen=mode;quads++;phase=4;quadX=x;quadW=w;}
 static void XvLayout(XvTarget *target,VkImageLayout layout){assert(phase==4 && target==&xv.swap[1] && layout==VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);}
 VkResult vkAcquireNextImageKHR(VkDevice d,VkSwapchainKHR s,uint64_t t,VkSemaphore sem,VkFence f,uint32_t *i){assert(phase==0 && f==xv.acquireFence);*i=1;phase=1;return VK_SUCCESS;}
 VkResult vkWaitForFences(VkDevice d,uint32_t n,const VkFence *f,VkBool32 all,uint64_t t){assert(phase==1 && *f==xv.acquireFence);phase=2;return VK_SUCCESS;}
@@ -42,7 +51,13 @@ int main(void){
   assert(modeSeen==(resolved?(aa?3:0):2));
  }
  phase=0;NativeRenderer_PresentVRAMRect(0,0,0,216);assert(phase==0);
- puts("PASS: combined render/present frame submission, separate acquire fence reset before submit, present queued behind it, raw/AA/VRAM paths");
+ /* Widescreen: a VRAM present fills the screen. 4:3 on a widescreen output: the picture
+  * and black bars; a main present copies main, whose bars are already black. */
+ assert(bars==0 && quadX==0 && quadW==XV_WIDTH);
+ xvPicture=(VkRect2D){{160,0},{960,XV_HEIGHT}};
+ phase=0;xv.mainResolved=0;NativeRenderer_PresentVRAMRect(0,0,512,216);assert(phase==6 && quadX==160 && quadW==960 && bars==1);
+ phase=0;xv.mainResolved=1;NativeRenderer_PresentVRAMRect(0,0,512,216);assert(phase==6 && quadX==0 && quadW==XV_WIDTH && bars==1);
+ puts("PASS: combined render/present frame submission, separate acquire fence reset before submit, present queued behind it, raw/AA/VRAM paths; 4:3 VRAM presents keep black bars");
 }
 '''
 def run(text,name):

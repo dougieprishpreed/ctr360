@@ -287,6 +287,13 @@ void ElimBG_HandleState(struct GameTracker *gGT)
 			sdata->pause_state = ELIM_BG_PAUSE_STATE_DRAW;
 		}
 		// rest of the function is for drawing screenshot
+#ifdef _XBOX
+		/* The screenshot is the whole frame packed into the PSX draw area:
+		 * draw it over the full width, not the HUD's 4:3 area. Slots are
+		 * LIFO: link the UI environment restore before the tiles and the
+		 * full-width environment after them. */
+		PushBuffer_SetDrawEnv_Pass(&gGT->pushBuffer_UI.ptrOT[4], &gGT->pushBuffer_UI, gGT->backBuffer, 1);
+#endif
 		tileX = 0;
 		do
 		{
@@ -379,6 +386,9 @@ void ElimBG_HandleState(struct GameTracker *gGT)
 
 			// while u0 (tex coord X) < screensize
 		} while (tileX < ELIM_BG_SCREEN_W);
+#ifdef _XBOX
+		PushBuffer_SetDrawEnv_Pass(&gGT->pushBuffer_UI.ptrOT[4], &gGT->pushBuffer_UI, gGT->backBuffer, 0);
+#endif
 	}
 }
 

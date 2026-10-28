@@ -50,7 +50,6 @@ void MainFrame_RenderFrame(struct GameTracker *gGT, struct GamepadSystem *gGamep
 	{
 		ptr_mesh_info = lev->ptr_mesh_info;
 	}
-	{ static int s_rf = 0; if ((s_rf++ % 10) == 0) { Platform_Log("[probe] rf-in f=%d flags=%08x lev=%08x mesh=%08x\n", (int)sdata->frameCounter, (unsigned)gGT->renderFlags, (unsigned)(u32)lev, (unsigned)(u32)ptr_mesh_info); } }
 
 	if ((gGT->renderFlags & RENDER_FLAG_VISMEM_REFRESH_MASK) != 0)
 	{
@@ -163,11 +162,9 @@ void MainFrame_RenderFrame(struct GameTracker *gGT, struct GamepadSystem *gGamep
 #endif
 		{
 			MAINFRAME_PERF_BEGIN(NATIVE_PERF_BUCKET_MAINFRAME_LEVEL_GEOMETRY);
-			{ static int s_lg = 0; if ((s_lg++ % 10) == 0) { Platform_Log("[probe] lg-in f=%d nq=%d nv=%d nb=%d bsp=%08x\n", (int)sdata->frameCounter, (int)ptr_mesh_info->numQuadBlock, (int)ptr_mesh_info->numVertex, (int)ptr_mesh_info->numBspNodes, (unsigned)(u32)ptr_mesh_info->bspRoot); } }
 			MainFrame_TraceLateRender("geometry-enter");
 			RenderAllLevelGeometry(gGT, lev, ptr_mesh_info);
 			MainFrame_TraceLateRender("geometry-exit");
-			{ static int s_lx = 0; if ((s_lx++ % 10) == 0) { Platform_Log("[probe] lg-out f=%d\n", (int)sdata->frameCounter); } }
 			MAINFRAME_PERF_END(NATIVE_PERF_BUCKET_MAINFRAME_LEVEL_GEOMETRY);
 		}
 
@@ -750,7 +747,6 @@ void RenderBucket_QueueAllInstances(struct GameTracker *gGT)
 
 	// null terminator at end of list
 	*RBI = 0;
-	{ static int s_qb = 0; if ((s_qb++ % 30) == 0) { Platform_Log("[probe] qb base=%08x end=%08x n=%d first=%08x first2=%08x' + NL + '", (unsigned)(u32)gGT->ptrRenderBucketInstance, (unsigned)(u32)RBI, (int)(((u32 *)RBI - (u32 *)gGT->ptrRenderBucketInstance) / 2), (unsigned)((u32 *)gGT->ptrRenderBucketInstance)[0], (unsigned)((u32 *)gGT->ptrRenderBucketInstance)[1]); } }
 
 	{
 		extern u32 g_ctr360_qdAtt;
@@ -853,7 +849,6 @@ void RenderAllFlag0x40(struct GameTracker *gGT)
 
 void RenderAllTitleDPP(struct GameTracker *gGT)
 {
-	{ static int s_rt = 0; if (s_rt < 80) { s_rt++; Platform_Log("[probe] title-dpp mode1=%08x open=%d\n", (unsigned)gGT->gameMode1, (int)LOAD_IsOpen_MainMenu()); } }
 	if ((gGT->gameMode1 & MAIN_MENU) == 0)
 	{
 		return;
@@ -862,7 +857,6 @@ void RenderAllTitleDPP(struct GameTracker *gGT)
 	{
 		return;
 	}
-	{ static int s_td = 0; if ((s_td++ % 30) == 0) { Platform_Log("[probe] rf13-open f=%d\n", (int)sdata->frameCounter); } }
 	MM_Title_SetTrophyDPP();
 }
 
@@ -873,7 +867,6 @@ void RenderBucket_ExecuteAllInstances(struct GameTracker *gGT)
 		return;
 	}
 
-	{ static int s_eb = 0; if ((s_eb++ % 30) == 0) { Platform_Log("[probe] eb base=%08x first=%08x first2=%08x primcur=%08x' + NL + '", (unsigned)(u32)gGT->ptrRenderBucketInstance, (unsigned)((u32 *)gGT->ptrRenderBucketInstance)[0], (unsigned)((u32 *)gGT->ptrRenderBucketInstance)[1], (unsigned)(u32)gGT->backBuffer->primMem.cursor); } }
 	RenderBucket_Execute(gGT->ptrRenderBucketInstance, &gGT->backBuffer->primMem);
 }
 

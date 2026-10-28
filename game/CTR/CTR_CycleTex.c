@@ -92,7 +92,6 @@ void CTR_CycleTex_AllModels(u32 numModels, struct Model **pModelArray, int timer
 	{
 		{ g_ctr360_modelWalkGuard++; g_ctr360_hdrGuard = 0; g_ctr360_ctxWalkGuard = 0; if (g_ctr360_modelWalkGuard > 512) { Platform_Log("[probe] am-guard num=%d arr=%08x\n", (int)numModels, (unsigned)(u32)pModelArray); return; } }
 		pModel = *pModelArray;
-		{ static int s_am = 0; if ((s_am < 300) && ((sdata->gGT->gameMode1 & 0x2000) != 0)) { s_am++; Platform_Log("[probe] am f=%d num=%d arr=%08x m=%08x\n", (int)sdata->frameCounter, (int)numModels, (unsigned)(u32)pModelArray, (unsigned)(u32)pModel); } }
 		if (pModel == NULL)
 		{
 			return;

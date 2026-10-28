@@ -158,7 +158,11 @@ void UI_RenderFrame_Racing()
 						DecalFont_DrawLine(sdata->lngStrings[LNG_WRONG_WAY],
 
 						                   // midpointX
+#ifdef _XBOX
+						                   NativeHD_ViewportMidX(pb),
+#else
 						                   pb->rect.x + (pb->rect.w >> 1),
+#endif
 
 						                   // midpointY, 0x1e higher
 						                   pb->rect.y + (pb->rect.h >> 1) - 0x1e,
@@ -832,7 +836,11 @@ void UI_RenderFrame_Racing()
 				}
 
 				DecalFont_DrawLine(pbVar6,
+#ifdef _XBOX
+				                   NativeHD_ViewportMidX(pb),             // midpointX
+#else
 				                   pb->rect.x + (pb->rect.w >> 1),        // midpointX
+#endif
 				                   pb->rect.y + (pb->rect.h >> 1) - 0x1e, // midpointY
 				                   FONT_BIG, (JUSTIFY_CENTER | ORANGE));
 

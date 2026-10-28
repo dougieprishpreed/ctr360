@@ -113,7 +113,7 @@ Policy:
   and upscale at present (default; cheapest, most faithful), or render at the
   output resolution. The upscaled mode trades fill rate for sharpness and is
   the documented perf-costly variant (see PERFORMANCE_360.md §3.1).
-- `widescreen = 0 | 1` - 4:3 (default) or 16:9 presentation.
+- `widescreen = 0 | 1` - 4:3 or 16:9 (default) presentation.
 - `log = 0 | 1` - write the debug log file at all.
 
 ## 4. Architecture mapping (PC → 360)

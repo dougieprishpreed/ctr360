@@ -689,7 +689,6 @@ void MM_JumpTo_Title_FirstTime(void)
 {
 	register struct GameTracker *gGT CTR_PSX_REGISTER("$4");
 	register struct RectMenu *mainMenu CTR_PSX_REGISTER("$5");
-	{ static int s_jf = 0; if (s_jf < 8) { s_jf++; Platform_Log("[probe] jump-to-title-first-time\n"); } }
 
 	MM_ResetAllMenus();
 

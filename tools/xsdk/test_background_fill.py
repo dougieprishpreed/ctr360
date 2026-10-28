@@ -64,7 +64,8 @@ VkResult vkInvalidateMappedMemoryRanges(VkDevice d,uint32_t n,const VkMappedMemo
 static void XvBegin(void){xv.recording=1;}
 static void XvSubmit(void){if(xv.inPass){vkCmdEndRenderPass(xv.command);xv.inPass=0;}Event("submit");}
 static void XvReserveUniform(void){}
-static void XvBindUniform(const XvUniform *u,unsigned t){(void)u;(void)t;}
+static float quadSource[4];
+static void XvBindUniform(const XvUniform *u,unsigned t){(void)t;memcpy(quadSource,u->source,sizeof(quadSource));}
 static VkPipeline XvPipeline(unsigned p,int s,int b,int st){(void)p;(void)s;(void)b;(void)st;return VK_NULL_HANDLE;}
 static void XvReadTarget(XvTarget *t){XvLayout(t,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);vkCmdCopyImageToBuffer(xv.command,t->image,t->layout,xv.staging.buffer,1,NULL);XvSubmit();}
 static void XvPaletteWritten(int x,int y,int w,int h){(void)x;(void)y;(void)w;(void)h;}
@@ -72,6 +73,8 @@ static void XvPaletteReset(void){}
 static void NativeRenderer_UpdateVRAM(void){if(xv.vramCPUChanged){XvSubmit();Event("upload");xv.vramCPUChanged=0;}}
 #define XV_WIDTH 1280
 #define XV_HEIGHT 720
+static float xvSqueeze=1;
+static VkRect2D xvPicture={{0,0},{XV_WIDTH,XV_HEIGHT}};
 '''+pending+code+r'''
 static unsigned Count(const char *prefix,unsigned from){unsigned n=0;for(unsigned i=from;i<eventCount;i++)n+=!strncmp(events[i],prefix,strlen(prefix));return n;}
 static int Find(const char *text,unsigned from){for(unsigned i=from;i<eventCount;i++)if(!strncmp(events[i],text,strlen(text)))return (int)i;return -1;}
@@ -114,7 +117,16 @@ int main(void){
  assert(b>=0 && c2>b && xvPendingFillCount==0);
  /* A restored VRAM state drops them. */
  Frame(0,1);static u16 state[1024*512];NativeRenderer_RestoreVRAMState(state,sizeof(state));assert(xvPendingFillCount==0);
- puts("PASS: background fills wait for the frame's VRAM pass: 3 passes a whole frame, 2 a midpoint; readbacks, VRAM copies and fills elsewhere apply them first, in order");
+ /* Widescreen packs all of main; 4:3 on a widescreen output keeps the picture in the
+  * middle 960 pixels: the fills clear there and the pack takes only that. */
+ from=eventCount;Frame(296,0);assert(Find("clear main 0,0,1280,380 ",from)>=0 && Find("clear main 0,380,1280,340 ",from)>=0);
+ XvPack(&xv.main,0,296,512,216);assert(quadSource[0]==0 && quadSource[2]==1 && quadSource[3]==1);
+ xvSqueeze=0.75f;xvPicture=(VkRect2D){{160,0},{960,XV_HEIGHT}};
+ from=eventCount;Frame(296,0);
+ assert(Find("clear main 160,0,960,380 ",from)>=0 && Find("clear main 160,380,960,340 ",from)>=0);
+ XvPack(&xv.main,0,296,512,216);assert(quadSource[0]==0.125f && quadSource[1]==0 && quadSource[2]==0.75f && quadSource[3]==1);
+ XvPack(&xv.off,64,0,32,16);assert(quadSource[0]==0 && quadSource[2]==32.0f/1024 && quadSource[3]==16.0f/512);
+ puts("PASS: background fills wait for the frame's VRAM pass: 3 passes a whole frame, 2 a midpoint; readbacks, VRAM copies and fills elsewhere apply them first, in order; 4:3 fills and packs keep to the picture");
 }
 '''
 def run(text,name):

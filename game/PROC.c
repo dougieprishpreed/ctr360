@@ -608,7 +608,6 @@ void ThTick_RunBucket(struct Thread *thread)
 			continue;
 		}
 
-		{ static int s_tt = 0; if ((s_tt < 240) && ((sdata->gGT->gameMode1 & 0x2000) != 0)) { s_tt++; Platform_Log("[probe] tt thr=%08x fn=%08x\n", (unsigned)(u32)t, (unsigned)(u32)(t->funcThTick)); } }
 		if (t->funcThTick != NULL)
 		{
 #if defined(CTR_NATIVE)

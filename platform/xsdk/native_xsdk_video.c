@@ -58,6 +58,11 @@ int g_windowWidth=1280,g_windowHeight=720;
 static int xvEdgeAA=1;
 /* [debug] self_test = 1 runs the boot checks of actual GPU pixels and logs them. */
 static int xvSelfTest;
+/* [graphics] widescreen = 0 on a widescreen output draws everything into the
+ * middle 960 pixels (xvPicture) with black bars. A 4:3 output keeps the full
+ * 720p image: the console's scaler narrows it to 4:3 itself. */
+static float xvSqueeze=1;
+static VkRect2D xvPicture={{0,0},{XV_WIDTH,XV_HEIGHT}};
 /* Fills of the displayed draw area wait for the next VRAM pass, where the frame's
  * pack draws over them. Drawn at once, each fill switched the GPU to VRAM and back
  * mid-frame: a resolve and a redraw of the 720p target in eDRAM each time. Every
@@ -425,13 +430,17 @@ static void XvConfig(const char *section,const char *key,const char *value,void 
     if(!strcmp(key,"interpolation"))g_nativeHDEnableInterpolation=enabled;
     if(!strcmp(key,"texture_filter"))g_cfg_bilinearFiltering=enabled;
     if(!strcmp(key,"edge_aa"))xvEdgeAA=enabled;
+    if(!strcmp(key,"widescreen"))g_nativeHDWidescreen=enabled;
 }
 int NativeRenderer_InitialiseRender(char *name,int width,int height,int fullscreen)
 {
     (void)name;(void)width;(void)height;(void)fullscreen;
     NativeConfig_Read("game:/ctr360.ini",XvConfig,NULL);
-    Platform_Log("[graphics] interpolation=%d texture_filter=%d edge_aa=%d self_test=%d\n",
-        g_nativeHDEnableInterpolation,g_cfg_bilinearFiltering,xvEdgeAA,xvSelfTest);
+    VIDEO_MODE video={0};VdQueryVideoMode(&video);
+    NativeHD_WidenSplitScreenHud();
+    Platform_Log("[graphics] interpolation=%d texture_filter=%d edge_aa=%d widescreen=%d output=%ux%u%s self_test=%d\n",
+        g_nativeHDEnableInterpolation,g_cfg_bilinearFiltering,xvEdgeAA,g_nativeHDWidescreen,
+        (unsigned)video.display_width,(unsigned)video.display_height,video.is_widescreen?" widescreen":"",xvSelfTest);
     const char *instanceExtensions[]={VK_KHR_SURFACE_EXTENSION_NAME,VK_KHR_DISPLAY_EXTENSION_NAME};
     const char *deviceExtensions[]={VK_KHR_SWAPCHAIN_EXTENSION_NAME};
     VkApplicationInfo app={.sType=VK_STRUCTURE_TYPE_APPLICATION_INFO,.pApplicationName="ctr360 xSDK experimental",.apiVersion=VK_API_VERSION_1_0};
@@ -531,6 +540,11 @@ int NativeRenderer_InitialiseRender(char *name,int width,int height,int fullscre
     Platform_Log("[vulkan] pipelines ready; submitting initial clears\n");
     XvSubmit();xv.state.rect[2]=512;xv.state.rect[3]=216;xv.state.scale[0]=1;xv.vramCPUChanged=1;
     if(xvSelfTest)XvColorCheck();
+    /* After the boot checks, which measure the full 720p raster. */
+    if(!g_nativeHDWidescreen && video.is_widescreen){
+        xvSqueeze=0.75f;
+        xvPicture=(VkRect2D){{XV_WIDTH/8,0},{XV_WIDTH*3/4,XV_HEIGHT}};
+    }
     XvPrepareForGame();
     Platform_Log("[vulkan] 720p renderer initialized (experimental)\n");return 1;
 }
@@ -559,7 +573,10 @@ void NativeRenderer_SetupClipMode(const RECT16 *clip,const DISPENV *display,int 
 {
     xv.clipEnabled=enabled && (display->isinter || clip->x!=display->disp.x || clip->y!=display->disp.y || clip->w!=display->disp.w || clip->h!=display->disp.h);
     if(!xv.clipEnabled)return;
-    float sx=xv.ui?0.75f:1.0f;
+    /* Clip rects are viewports or the whole screen, which only 4:3 squeezes.
+     * Widescreen HUD art keeps to its player's 16:9 viewport, where the
+     * 3/4-player layout anchors its outer elements. */
+    float sx=xvSqueeze;
     float dw=display->disp.w>0?display->disp.w:1,dh=display->disp.h>0?display->disp.h:1;
     int left=(int)((((clip->x-display->disp.x)/dw-0.5f)*sx+0.5f)*XV_WIDTH);
     int top=(int)((clip->y-display->disp.y)/dh*XV_HEIGHT);
@@ -609,9 +626,10 @@ static void XvDrawTriangles(int first,int triangles,int filtering)
     unsigned width=xv.offscreen?xv.offRect.w:XV_WIDTH,height=xv.offscreen?xv.offRect.h:XV_HEIGHT;
     XvReserveUniform();
     VkViewport viewport={0,0,(float)width,(float)height,0,1};VkRect2D clip={{0,0},{width,height}};
-    if(xv.clipEnabled && !xv.offscreen)clip=xv.scissor;
+    if(!xv.offscreen)clip=xv.clipEnabled?xv.scissor:xvPicture;
     vkCmdSetViewport(xv.command,0,1,&viewport);vkCmdSetScissor(xv.command,0,1,&clip);
-    xv.state.scale[0]=xv.ui && !xv.offscreen?0.75f:1.0f;xv.state.scale[1]=xv.state.rect[2]*0.5f;
+    /* Widescreen squeezes the authored 4:3 HUD to the middle; 4:3 squeezes everything. */
+    xv.state.scale[0]=xv.offscreen?1.0f:xv.ui && g_nativeHDWidescreen?0.75f:xvSqueeze;xv.state.scale[1]=xv.state.rect[2]*0.5f;
     xv.state.scale[2]=xv.offscreen?1.0f:0.0f;xv.state.scale[3]=(float)xv.format;
     xv.state.flags[3]=filtering;
     if(g_dbg_texturelessMode)xv.state.scale[3]=3;
@@ -719,8 +737,9 @@ void NativeRenderer_Clear(int x,int y,int w,int h,u8 r,u8 g,u8 b)
     XvPass(&xv.main);
     VkClearAttachment clear={.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT,.colorAttachment=0,
         .clearValue.color.float32={(r>>3)*8/255.0f,(g>>3)*8/255.0f,(b>>3)*8/255.0f,0}};
-    int x0=(left-dx)*XV_WIDTH/dw,y0=(top-dy)*XV_HEIGHT/dh;
-    int x1=(right-dx)*XV_WIDTH/dw,y1=(bottom-dy)*XV_HEIGHT/dh;
+    int pictureX=xvPicture.offset.x,pictureW=(int)xvPicture.extent.width;
+    int x0=pictureX+(left-dx)*pictureW/dw,y0=(top-dy)*XV_HEIGHT/dh;
+    int x1=pictureX+(right-dx)*pictureW/dw,y1=(bottom-dy)*XV_HEIGHT/dh;
     VkClearRect rect={.rect={{x0,y0},{x1-x0,y1-y0}},.layerCount=1};vkCmdClearAttachments(xv.command,1,&clear,1,&rect);xv.mainValid=1;
 }
 static void XvPack(XvTarget *target,int x,int y,int w,int h)
@@ -734,8 +753,10 @@ static void XvPack(XvTarget *target,int x,int y,int w,int h)
         if(!XvRectInside(f->offset.x,f->offset.y,(int)f->extent.width,(int)f->extent.height,x,y,w,h))xvPendingFills[kept++]=xvPendingFills[i];
     }
     xvPendingFillCount=kept;
-    float sw=target==&xv.off?(float)w/target->width:1,sh=target==&xv.off?(float)h/target->height:1;
-    XvQuad(&xv.vram,target,1,x,y,w,h,0,0,sw,sh);XvLayout(&xv.vram,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);xv.vramGPUChanged=1;
+    /* The offscreen target holds the rect at its origin; main holds the picture. */
+    float su=target==&xv.off?0:(1-xvSqueeze)*0.5f;
+    float sw=target==&xv.off?(float)w/target->width:xvSqueeze,sh=target==&xv.off?(float)h/target->height:1;
+    XvQuad(&xv.vram,target,1,x,y,w,h,su,0,sw,sh);XvLayout(&xv.vram,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);xv.vramGPUChanged=1;
     XvPaletteWritten(x,y,w,h);
 }
 void NativeRenderer_SetOffscreenState(const RECT16 *rect,int enabled)
@@ -774,7 +795,17 @@ void NativeRenderer_PresentVRAMRect(int x,int y,int w,int h)
     XV_CALL(vkWaitForFences(xv.device,1,&xv.acquireFence,VK_TRUE,UINT64_MAX));XV_CALL(vkResetFences(xv.device,1,&xv.acquireFence));
     xvCost.acquireMS+=GetTickCount()-started;
     if(xv.mainResolved)XvQuad(&xv.swap[index],&xv.main,xvEdgeAA?3:0,0,0,XV_WIDTH,XV_HEIGHT,0,0,1,1);
-    else XvQuad(&xv.swap[index],&xv.vram,2,0,0,XV_WIDTH,XV_HEIGHT,x/1024.0f,y/512.0f,w/1024.0f,h/512.0f);
+    else{
+        XvQuad(&xv.swap[index],&xv.vram,2,xvPicture.offset.x,0,xvPicture.extent.width,XV_HEIGHT,x/1024.0f,y/512.0f,w/1024.0f,h/512.0f);
+        if(xvPicture.offset.x>0){
+            /* Swapchain images keep earlier frames: blacken the 4:3 bars. */
+            int right=xvPicture.offset.x+(int)xvPicture.extent.width;
+            VkClearAttachment black={.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT,.colorAttachment=0};
+            VkClearRect bars[2]={{.rect={{0,0},{(unsigned)xvPicture.offset.x,XV_HEIGHT}},.layerCount=1},
+                {.rect={{right,0},{(unsigned)(XV_WIDTH-right),XV_HEIGHT}},.layerCount=1}};
+            vkCmdClearAttachments(xv.command,1,&black,2,bars);
+        }
+    }
     XvLayout(&xv.swap[index],VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
     XvSubmitFrame();
     VkPresentInfoKHR present={.sType=VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,.swapchainCount=1,.pSwapchains=&xv.swapchain,.pImageIndices=&index};
@@ -794,6 +825,12 @@ void NativeRenderer_PresentVRAMRect(int x,int y,int w,int h)
             xvCost.uiDraws,xvCost.feedbackRequests,xvCost.midpointFeedbackSkips,xvCost.skippedSTPPasses);
         if(xvCost.gpuFrames)Platform_Log("[vulkan-gpu] frames=%u avg=%.1fms max=%.1fms over16ms=%u\n",
             xvCost.gpuFrames,xvCost.gpuTotalUS/1000.0/xvCost.gpuFrames,xvCost.gpuMaxUS/1000.0,xvCost.gpuOver16);
+        /* Render-pass eDRAM work in the layer: targets drawn back for a pass, and resolves. */
+        static V4xEdramCounts lastEdram;V4xEdramCounts edram=v4x_edram_counts();
+        Platform_Log("[vulkan-edram] drawn-back=%u clear-resolves=%u resolves-put-off=%u late-resolves=%u\n",
+            edram.drawn_back-lastEdram.drawn_back,edram.clear_resolves-lastEdram.clear_resolves,
+            edram.resolves_put_off-lastEdram.resolves_put_off,edram.late_resolves-lastEdram.late_resolves);
+        lastEdram=edram;
         frames=0;lastReport=now;memset(&xvCost,0,sizeof(xvCost));
     }
 }

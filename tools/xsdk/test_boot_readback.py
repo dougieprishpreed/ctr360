@@ -20,10 +20,13 @@ reader=function(s,'static void XvReadTarget(')
 clearer=function(s,'static void XvClearDiagnosticTarget(')
 sweep=function(s,'static unsigned XvSweepWord(')+function(s,'static void XvSweepExpected(')+function(s,'static void XvColorSweep(')+function(s,'static void XvMeshCheck(')
 checks=function(s,'static void XvColorCheck(void)\n{')+function(s,'static void XvPrepareForGame(void)\n{')
-# The checks run only on request; the game's starting state is set either way.
-assert 'if(xvSelfTest)XvColorCheck();\n    XvPrepareForGame();' in s,'boot checks not optional or starting state skipped'
+# The checks run only on request, on the full 720p raster (before the 4:3 picture is set);
+# the game's starting state is set either way.
+boot=s[s.index('if(xvSelfTest)XvColorCheck();'):s.index('[vulkan] 720p renderer initialized')]
+assert re.fullmatch(r'if\(xvSelfTest\)XvColorCheck\(\);\n    /\*[^*]*\*/\n    if\(!g_nativeHDWidescreen && video\.is_widescreen\)\{\n'
+                    r'        xvSqueeze=0\.75f;\n        xvPicture=[^\n]*\n    \}\n    XvPrepareForGame\(\);\n    Platform_Log\("',boot),'boot checks not optional or starting state skipped'
 allocate=re.search(r'XvBufferCreate\(&xv.staging,([^,]+),',s)[1]
-validator=function(upstream,'static uint32_t level_size(')+function(upstream,'static bool whole_level(')
+validator=function(upstream,'static uint32_t level_size(')+function(upstream,'static bool in_level(')+function(upstream,'static bool whole_level(')
 c=r'''
 #include <vulkan/vulkan.h>
 #include <assert.h>
@@ -46,7 +49,10 @@ enum {XV_WIDTH=1280,XV_HEIGHT=720,XSDK_TEXTURE_3D=3};
 typedef struct {VkImage image;VkImageLayout layout;unsigned width,height;int clearStencil;} XvTarget;
 typedef struct {VkBuffer buffer;VkDeviceMemory memory;unsigned char *map;size_t size;} XvBuffer;
 typedef struct {unsigned first,count;} Slices;
-typedef struct {unsigned width,height;bool is_texture;struct {unsigned dimension,levels,depth;} texture;} Image;
+typedef struct {unsigned width,height,format;bool is_texture;struct {unsigned dimension,levels,depth;} texture;} Image;
+/* The targets are uncompressed RGBA8. */
+typedef struct {bool compressed;} V4xFormat;
+static const V4xFormat *v4x_format(unsigned format){static const V4xFormat rgba8={false};(void)format;return &rgba8;}
 static struct {
  VkDevice device;VkCommandBuffer command;XvBuffer staging;XvTarget main,off,vram;
  RECT16 offRect;int offscreen,drawPrim,vramCPUChanged,vramGPUChanged,mainValid,mainResolved,clipEnabled,ui;

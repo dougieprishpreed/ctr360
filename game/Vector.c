@@ -152,6 +152,36 @@ static s16 Vector_BakeMatrixTable_Div4TowardZero(s32 value)
 	return (s16)(value >> 2);
 }
 
+#if defined(CTR_NATIVE)
+/* zGlobal_DATA writes each entry's authored scale.z and the pad after it as
+ * the int t[0], scale in the low half: retail's little-endian image. On
+ * big-endian Xenon that put the pad first, so every baked wheelie, jump,
+ * squish and crash-fall matrix had scale.z 0 and flattened the kart front to
+ * back (both wheel pairs at one spot). Rewrite the halves in field order. */
+static void Vector_BakeMatrixTable_SplitAuthoredScaleZ(void)
+{
+	for (int i = 0; i < BAKED_GTE_MATRIX_COUNT; i++)
+	{
+		struct MatrixND *entries = data.bakedGteMath[i].physEntry;
+		int count = data.bakedGteMath[i].numEntries;
+
+		if ((entries == NULL) || (count <= 0))
+		{
+			continue;
+		}
+
+		for (int j = 0; j < count; j++)
+		{
+			s32 word = entries[j].t[0];
+			MatrixNDAuthored *authored = MatrixND_GetAuthored(&entries[j]);
+
+			authored->authoredScale.z = (s16)word;
+			authored->authoredScale.w = (s16)(word >> 16);
+		}
+	}
+}
+#endif
+
 static void Vector_BakeMatrixTable_PrepareBlastedFrames(void)
 {
 	struct MatrixND *entries = data.bakedGteMath[BAKED_GTE_MATRIX_BLASTED].physEntry;
@@ -247,6 +277,9 @@ void Vector_BakeMatrixTable(void)
 
 	sdata->matrixTableBaked = 1;
 
+#if defined(CTR_NATIVE)
+	Vector_BakeMatrixTable_SplitAuthoredScaleZ();
+#endif
 	Vector_BakeMatrixTable_PrepareBlastedFrames();
 	Vector_BakeMatrixTable_BakeRotScaleEntries();
 	Vector_BakeMatrixTable_BakeBlastedOffsets();

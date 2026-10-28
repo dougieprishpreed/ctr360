@@ -17,8 +17,8 @@ fetch() {
     git -C "$DEPS/$name" checkout --detach "$sha"
   fi
 }
-fetch xsdk main d5593c6fa8a7d60230aa8297947609edfa57393a
-fetch vulkan4xenon main b79913b407504b1e1663e74b14579cd91d2e7040
+fetch xsdk main 8c58c7a3fb37bb261c5a11a8a1f4fa8a8bfd0d28
+fetch vulkan4xenon main df25dc50e6296d89822626b433f4080db05bccc8
 fetch glslang-xenon xenon d2f00185cf5feaa449f6e15c1894fb232b2b6bcd
 (cd "$DEPS/xsdk"; PREFIX="$PREFIX" WORK="$DEPS/toolchain-work" JOBS="$JOBS" bash tools/toolchain/build.sh)
 mkdir -p "$PREFIX/share/ctr360-licenses"

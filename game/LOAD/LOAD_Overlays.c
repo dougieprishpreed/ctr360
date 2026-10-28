@@ -68,7 +68,6 @@ static void LOAD_NativeResetThreadsOverlay(enum OverlayIndex overlayIndex)
 void LOAD_OvrThreads(u32 overlayIndex)
 {
 	struct GameTracker *gGT = sdata->gGT;
-	{ static int s_ov = 0; if (s_ov < 20) { s_ov++; Platform_Log("[probe] ovr idx=%d cur=%d\n", (int)overlayIndex, (int)((sdata->gGT != NULL) ? (int)sdata->gGT->overlayIndex_Threads : -1)); } }
 
 	// if new Threads overlay needs to load
 	if ((u32)gGT->overlayIndex_Threads != overlayIndex)

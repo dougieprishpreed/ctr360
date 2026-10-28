@@ -1,6 +1,8 @@
 #include <common.h>
 
 #ifdef _XBOX
+#include <math.h>
+
 /* Render-only midpoint frames. The retail simulation, input sampling, audio,
  * race timers and animation ticks retain their existing cadence. Never call
  * MainFrame_GameLogic, UI/menu updates, particle ticks or pickups here. */
@@ -54,6 +56,59 @@ static SVec3 s_hdCameraRotation;
 static u32 s_hdOTBackup[0x406];
 int g_nativeHDIntermediate;
 int g_nativeHDEnableInterpolation = 1;
+/* [graphics] widescreen: 1 shows more of the world in 16:9 with the authored
+ * HUD in a centred 4:3 area; 0 keeps the original 4:3 view. Boot-time only. */
+int g_nativeHDWidescreen = 1;
+
+/* The HUD squeeze centres the authored 512-wide layout on the screen: PSX x
+ * 0 lands 85 of its 1.875-pixel units in from the edge. */
+#define NATIVE_HD_SPLIT_HUD_MARGIN 85
+
+static int NativeHD_DivRound3(int value)
+{
+    return value >= 0 ? (value + 1) / 3 : -((1 - value) / 3);
+}
+
+/* Three and four players: each viewport is a 16:9 quarter of the screen,
+ * but the squeeze keeps the 4:3 layout around the screen's centre, which
+ * pulled every player's outer elements (place number, weapon, meters) in
+ * over the kart. Anchor each element to the nearer side of its viewport:
+ * outer-half elements move out by the squeeze's margin and keep their 4:3
+ * distance from the screen edge; inner ones already keep theirs from the
+ * centre. Groups (a place number and its suffix; the fruit, its count and
+ * shine) lie in one half and keep their spacing. The shines draw in their
+ * player's viewport, relative to its origin. Widescreen only, once. */
+void NativeHD_WidenSplitScreenHud(void)
+{
+    static int widened;
+    struct UiElement2D *tables[4] = {data.hud_4P_P1, data.hud_4P_P2, data.hud_4P_P3, data.hud_4P_P4};
+    int player, slot;
+    if (widened || !g_nativeHDWidescreen) return;
+    widened = 1;
+    for (player = 0; player < 4; player++)
+    {
+        /* PushBuffer_Init: right-hand viewports start at 0x103; all are 0xfd wide. */
+        int right = player & 1, left = right ? 0x103 : 0, middle = left + 0xfd / 2;
+        for (slot = 0; slot < UI_HUD_SLOT_COUNT; slot++)
+        {
+            struct UiElement2D *element = &tables[player][slot];
+            int x = element->x;
+            if (slot == UI_HUD_SLOT_BATTLE_WEAPON_BG || slot == UI_HUD_SLOT_RACING_WEAPON_BG) x += left;
+            if (right ? x > middle : x < middle)
+                element->x = (s16)(element->x + (right ? NATIVE_HD_SPLIT_HUD_MARGIN : -NATIVE_HD_SPLIT_HUD_MARGIN));
+        }
+    }
+}
+
+/* Where HUD text centred on a viewport goes. Centred on a 3/4-player
+ * viewport, the squeeze put it 81 pixels towards the screen's middle; aim
+ * it at the viewport's own centre instead. */
+int NativeHD_ViewportMidX(const struct PushBuffer *pb)
+{
+    int mid = pb->rect.x + (pb->rect.w >> 1);
+    if (g_nativeHDWidescreen && sdata->gGT->numPlyrCurrGame >= 3) mid = NativeHD_DivRound3(4 * mid - 256);
+    return mid;
+}
 
 /* Draw-only copies of the authored frame's other layers, from the current
  * simulation state. Confetti draws with its update paused; window fades and
@@ -124,18 +179,42 @@ static void NativeHD_DrawCountdown(struct GameTracker *gGT)
 static void NativeHD_InterpolateMatrix(MATRIX *out, const MATRIX *previous, const MATRIX *current)
 {
     int row, col;
+    float mid[3][3];
     *out = *current;
+    /* Instance translations are native; rotation halfwords remain LE. */
     for (row = 0; row < 3; row++)
-    {
-        /* Instance translations are native; rotation halfwords remain LE. */
         out->t[row] = current->t[row] + (previous->t[row] - current->t[row]) / 2;
-        for (col = 0; col < 3; col++)
+    /* Halving the sum of two rotations shortens each axis by the cosine of
+     * half the turn between them: the hub warp pad's beam, which jumps 45 to
+     * 270 degrees every other update, collapsed on midpoints and flickered.
+     * Keep each axis at its average length; past a quarter turn there is no
+     * pose to blend, so the midpoint keeps the current rotation. */
+    for (col = 0; col < 3; col++)
+    {
+        float previousLength = 0, currentLength = 0, midLength = 0, length;
+        for (row = 0; row < 3; row++)
         {
-            int a = (s16)CTR_ReadU16LE(&previous->m[row][col]);
-            int b = (s16)CTR_ReadU16LE(&current->m[row][col]);
-            CTR_WriteU16LE(&out->m[row][col], (u16)(b + (a - b) / 2));
+            float a = (s16)CTR_ReadU16LE(&previous->m[row][col]);
+            float b = (s16)CTR_ReadU16LE(&current->m[row][col]);
+            mid[row][col] = (a + b) * 0.5f;
+            previousLength += a * a;
+            currentLength += b * b;
+            midLength += mid[row][col] * mid[row][col];
+        }
+        length = (sqrtf(previousLength) + sqrtf(currentLength)) * 0.5f;
+        if (midLength < length * length * 0.5f) return;
+        if (midLength > 0)
+        {
+            float scale = length / sqrtf(midLength);
+            for (row = 0; row < 3; row++) mid[row][col] *= scale;
         }
     }
+    for (row = 0; row < 3; row++)
+        for (col = 0; col < 3; col++)
+        {
+            float value = mid[row][col];
+            CTR_WriteU16LE(&out->m[row][col], (u16)(s16)(value < 0 ? value - 0.5f : value + 0.5f));
+        }
 }
 
 void NativeHD_RenderIntermediate(struct GameTracker *gGT)

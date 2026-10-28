@@ -1,5 +1,9 @@
 #include <common.h>
 
+#ifdef _XBOX
+extern int g_nativeHDWidescreen;
+#endif
+
 
 void PushBuffer_Init(struct PushBuffer *pb, int id, int total)
 {
@@ -433,7 +437,7 @@ void PushBuffer_SetMatrixVP(struct PushBuffer *pb)
 #ifdef _XBOX
     /* Preserve vertical FOV and reveal 4/3 as much horizontal geometry.
      * Runtime ViewProj is a mixed-layout object with LE rotation/translation. */
-    if (pb != &sdata->gGT->pushBuffer_UI)
+    if (g_nativeHDWidescreen && pb != &sdata->gGT->pushBuffer_UI)
     {
         int wideAxis;
         s32 wideTranslation = (s32)CTR_ReadU32LE(&pb->matrix_ViewProj.t[0]);
@@ -630,7 +634,7 @@ void PushBuffer_UpdateFrustum(struct PushBuffer *pb)
 	val_X = val_X / 2;
 #ifdef _XBOX
     /* The CPU BSP/instance frustum must cover the expanded horizontal view. */
-    if (pb != &sdata->gGT->pushBuffer_UI) val_X = val_X * 4 / 3;
+    if (g_nativeHDWidescreen && pb != &sdata->gGT->pushBuffer_UI) val_X = val_X * 4 / 3;
 #endif
 
 	val_Y = ((pb->rect.h * 0x600) / 0x360);

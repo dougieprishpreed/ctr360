@@ -11,7 +11,7 @@
     "category": "ports",
     "sentence": "The PC port of a classic PlayStation kart racer, at 1280x720 and up to 60 fps.",
     "needs": "assets\\ctr-u.bin from the PC converter",
-    "changes": "Listed in the store, and Back + Start returns to it. Otherwise the same as v1.0.2.",
+    "changes": "In the store, which Back + Start returns to; makes ctr360.ini on its first start.",
     "source": "https://github.com/dougieprishpreed/ctr360",
     "license": "GPL-3.0",
     "screenshot": "shots/ctr360.png",

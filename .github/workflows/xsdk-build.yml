@@ -65,11 +65,13 @@ jobs:
           (cd dist && sha256sum default.xex | tee default.xex.sha256)
 
       # The release's two zips, the Homebrew App Store package (made by xsdk's store_catalogue.py)
-      # and the one for installing by hand with the converter, and the store's catalogue entry.
+      # and the one for installing by hand with the converter, and the store's catalogue entry,
+      # checked with the console screenshot as the store's maintainer checks it.
       # Releases are published by hand from this artifact; upload the zips as they are.
       - name: Package the release
         run: |
-          python3 tools/xsdk/package.py --dist dist --out release --xsdk build-xsdk/deps/xsdk
+          python3 tools/xsdk/package.py --dist dist --out release --xsdk build-xsdk/deps/xsdk \
+            --screenshot tools/xsdk/shots/ctr360.png
           rm -rf release/work
 
       - uses: actions/upload-artifact@v4

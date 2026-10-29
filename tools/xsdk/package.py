@@ -13,7 +13,7 @@
 
 --dist is the build's dist/ folder (default.xex, licenses/, LICENSE.txt, THIRD_PARTY_NOTICES.txt,
 ctr360.example.ini). The app folder holds no ctr360.ini: the store replaces every packaged file on
-an update, and the game's defaults are the example's. With --screenshot (a 1280x720 PNG or JPEG of
+an update, so the game makes ctr360.ini from the example on its first start and keeps it. With --screenshot (a 1280x720 PNG or JPEG of
 2 MB at most, taken on the console) the catalogue is checked as the store's maintainer checks it.
 The pinned Python embeddable archive is downloaded unless --python supplies it; either way its
 hash must match.
@@ -70,9 +70,9 @@ Updating: copy the new ctr360 folder over the old one. Your saves
 (memcards) and settings (ctr360.ini) are kept, and you only need to convert
 your image again when the release notes say so.
 
-Back + Start exits the game. To change settings, copy ctr360.example.ini
-to ctr360.ini beside default.xex and edit it; each setting is described
-there.
+Back + Start exits the game. Settings are in ctr360.ini beside
+default.xex, which the game creates on its first start; each setting is
+described there.
 
 The converter runs on 64-bit Windows 10 or 11 without installation. It
 includes the official Python embeddable package; see
@@ -85,8 +85,8 @@ It needs assets\ctr-u.bin beside default.xex: your own Crash Team Racing
 (USA, SCUS-94426) disc image, converted on a PC by the converter in the
 CTR360-Xbox360 release zip.
 
-Back + Start exits. To change settings, copy ctr360.example.ini to
-ctr360.ini and edit it. Saves are kept in memcards\.
+Back + Start exits. Settings are in ctr360.ini, which the game creates
+from ctr360.example.ini on its first start. Saves are kept in memcards\.
 '''
 
 

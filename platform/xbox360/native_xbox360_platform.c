@@ -26,6 +26,7 @@
 #include <stdio.h>
 
 #include "platform/native_audio.h"
+#include "platform/native_config.h"
 #include "platform/native_gpu.h"
 #include "platform/native_input.h"
 #include "platform/native_log.h"
@@ -115,6 +116,12 @@ void Platform_Init(const char *title, int width, int height)
 	Platform_LogInit(title);
 
 	Platform_Log("[CTR Native] Initialising platform (Xbox 360)\n");
+
+	/* Before the renderer and input read their settings. */
+	if (NativeConfig_CreateDefault("game:/ctr360.ini", "game:/ctr360.example.ini"))
+	{
+		Platform_Log("[CTR Native] created ctr360.ini from ctr360.example.ini\n");
+	}
 
 	/* Device creation lives in the renderer, same split as the SDL build. */
 	if (!NativeRenderer_InitialiseRender((char *)title, width, height, 0))
@@ -384,7 +391,7 @@ void Platform_PollHostEvents(void)
 			Platform_Exit(0);
 		}
 #if defined(CTR_XSDK)
-		/* Screenshots for the store ([debug] screenshot = 1): Back + LB + RB, once per press. */
+		/* Screenshots in test builds (SCREENSHOTS=1): Back + LB + RB, once per press. */
 		{
 			extern void NativeRenderer_RequestCapture(void);
 			const WORD captureChord = XINPUT_GAMEPAD_BACK | XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_RIGHT_SHOULDER;

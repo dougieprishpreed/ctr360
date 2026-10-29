@@ -63,9 +63,13 @@ static int xvSelfTest;
  * 720p image: the console's scaler narrows it to 4:3 itself. */
 static float xvSqueeze=1;
 static VkRect2D xvPicture={{0,0},{XV_WIDTH,XV_HEIGHT}};
-/* [debug] screenshot = 1: Back + LB + RB writes the next finished frame's 720p
- * picture (before edge AA) to game:/screenshot_NNN.bmp, for store screenshots. */
-static int xvScreenshots,xvCaptureRequested;
+/* Test builds only (build.sh with SCREENSHOTS=1): Back + LB + RB writes the next
+ * finished frame's 720p picture (before edge AA) to game:/screenshot_NNN.bmp,
+ * for store screenshots. Releases leave it off. */
+#ifndef CTR360_SCREENSHOTS
+#define CTR360_SCREENSHOTS 0
+#endif
+static int xvScreenshots=CTR360_SCREENSHOTS,xvCaptureRequested;
 /* Fills of the displayed draw area wait for the next VRAM pass, where the frame's
  * pack draws over them. Drawn at once, each fill switched the GPU to VRAM and back
  * mid-frame: a resolve and a redraw of the 720p target in eDRAM each time. Every
@@ -424,11 +428,7 @@ static void XvCreatePasses(void)
 static void XvConfig(const char *section,const char *key,const char *value,void *context)
 {
     (void)context;
-    if(!strcmp(section,"debug")){
-        if(!strcmp(key,"self_test"))xvSelfTest=value[0]=='1';
-        if(!strcmp(key,"screenshot"))xvScreenshots=value[0]=='1';
-        return;
-    }
+    if(!strcmp(section,"debug")){if(!strcmp(key,"self_test"))xvSelfTest=value[0]=='1';return;}
     if(strcmp(section,"graphics"))return;
     // interpolation = 2 keeps menus, the hub, cutscenes and results at 30 FPS.
     if(!strcmp(key,"interpolation") && !strcmp(value,"2")){g_nativeHDEnableInterpolation=2;return;}

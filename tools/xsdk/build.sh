@@ -26,6 +26,7 @@ python3 "$ROOT/tools/xsdk/test_matrix_bake.py" --out "$OUT/matrix-tests"
 python3 "$ROOT/tools/xsdk/test_midpoint_spin.py" --out "$OUT/spin-tests"
 python3 "$ROOT/tools/xsdk/test_split_hud.py" --out "$OUT/split-hud-tests"
 python3 "$ROOT/tools/xsdk/test_pause_background.py" --out "$OUT/pause-tests"
+python3 "$ROOT/tools/xsdk/test_config_default.py" --out "$OUT/config-tests"
 python3 "$ROOT/tools/xsdk/test_log_buffer.py" --out "$OUT/log-tests"
 python3 "$ROOT/tools/xsdk/test_xa_stride.py" --out "$OUT/xa-tests"
 python3 "$ROOT/tools/xsdk/prepare_sources.py" --root "$ROOT" --out "$ROOT/build-xsdk/gen"
@@ -48,6 +49,8 @@ FLAGS=(-mcpu=cell -fno-pic -std=gnu17 -O2 -g -fno-strict-aliasing -fwrapv -mchec
   -DCTR_NATIVE -D_XBOX -DCTR_XSDK -I. -I"$XSDK/include" -I"$XSDK/src" -I"$VULKAN4XENON/include"
   -I"$VULKAN4XENON/third_party/vulkan-headers/include" -I"$GEN/platform/xsdk/compat"
   -I"$GEN/platform/xbox360/sdl_shim" -I"$GEN/include" -I"$GEN")
+# SCREENSHOTS=1 makes a test build whose Back + LB + RB saves screenshots; releases leave it off.
+if [ "${SCREENSHOTS:-0}" = 1 ]; then FLAGS+=(-DCTR360_SCREENSHOTS=1); fi
 "$CC" "${FLAGS[@]}" -c "$GEN/platform/xsdk/main_xsdk.c" -o ctr360.o
 "$CC" "${FLAGS[@]}" -c ctr_shaders.c -o ctr_shaders.o
 "$CC" -mcpu=cell -fno-pic -static -nostdlib -T "$XSDK/src/xsdk.ld" \

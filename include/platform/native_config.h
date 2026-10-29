@@ -6,5 +6,6 @@
 typedef void (*NativeConfigSetting)(const char *section, const char *key,
                                     const char *value, void *context);
 int NativeConfig_Read(const char *path, NativeConfigSetting setting, void *context);
+int NativeConfig_CreateDefault(const char *path, const char *examplePath);
 
 #endif

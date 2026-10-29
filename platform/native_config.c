@@ -62,3 +62,41 @@ int NativeConfig_Read(const char *path, NativeConfigSetting setting, void *conte
     fclose(file);
     return 1;
 }
+
+/* Make the settings file from the example beside it when it is missing, so
+ * the player has one to edit. Store updates replace only the files they
+ * install, so a file the game made stays. Returns 1 when it made one. */
+int NativeConfig_CreateDefault(const char *path, const char *examplePath)
+{
+    FILE *file, *example;
+    char buffer[4096];
+    size_t bytes;
+    int ok = 1;
+    file = fopen(path, "rb");
+    if (file != NULL)
+    {
+        fclose(file);
+        return 0;
+    }
+    example = fopen(examplePath, "rb");
+    if (example == NULL) return 0;
+    file = fopen(path, "wb");
+    if (file == NULL)
+    {
+        fclose(example);
+        return 0;
+    }
+    while ((bytes = fread(buffer, 1, sizeof(buffer), example)) > 0)
+    {
+        if (fwrite(buffer, 1, bytes, file) != bytes)
+        {
+            ok = 0;
+            break;
+        }
+    }
+    if (ferror(example)) ok = 0;
+    fclose(example);
+    if (fclose(file) != 0) ok = 0;
+    if (!ok) remove(path);
+    return ok;
+}

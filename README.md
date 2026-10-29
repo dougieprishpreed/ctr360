@@ -113,7 +113,7 @@ Replace `default.xex`, and the converted image if you created a new one, while *
 
 ## Configuration
 
-Edit `ctr360.ini` beside `default.xex` to change graphics and controller bindings. If it is missing, copy `ctr360.example.ini` to `ctr360.ini`. Restart after changes. The defaults are:
+Edit `ctr360.ini` beside `default.xex` to change graphics and controller bindings. The game creates it from `ctr360.example.ini` on its first start when it is missing. Restart after changes. The defaults are:
 
 ```ini
 [graphics]
@@ -141,8 +141,6 @@ The `[controls]` section maps original PlayStation buttons to Xbox controls for 
 **Saving fails or reports a full card.** Check that `memcards/` can be created and written beside `default.xex`, and that the drive has free space. Back up existing saves before investigating or replacing card files.
 
 **Performance is uneven.** Try `interpolation = 2`, then `0`. When reporting a problem, include the course, mode, how to reproduce it, and the build used. The game writes `default.log` beside `default.xex`; include it when available.
-
-**Taking screenshots.** Add a `[debug]` section with `screenshot = 1` to `ctr360.ini`. Back + LB + RB then writes the current frame, 1280×720 before edge smoothing, to `screenshot_NNN.bmp` beside `default.xex`.
 
 **Graphics look wrong.** Add a `[debug]` section with `self_test = 1` to `ctr360.ini`. The game then checks the console's rendering at startup and records the results in `default.log`; include that log in your report, then remove the setting again.
 

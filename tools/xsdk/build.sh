@@ -54,7 +54,9 @@ FLAGS=(-mcpu=cell -fno-pic -std=gnu17 -O2 -g -fno-strict-aliasing -fwrapv -mchec
   -Wl,--gc-sections,-Map,ctr360.map -o ctr360.elf ctr360.o ctr_shaders.o \
   -Wl,--start-group "$VULKAN4XENON/build/libvulkan4xenon.a" -lstdc++ "$XSDK/build/libxsdk.a" -lc -lm -lgcc -Wl,--end-group
 python3 "$ROOT/tools/xsdk/source_snapshot.py" --root "$ROOT" --prepared "$GEN"
-python3 "$XSDK/tools/elf2xex.py" ctr360.elf default.xex
+# The Homebrew App Store reads the title ID and version from the execution info (tools/xsdk/store.json).
+read -r TITLE_ID TITLE_NAME VERSION < <(python3 -c 'import json,sys;s=json.load(open(sys.argv[1]));print(s["title_id"],s["title_name"],s["version"])' "$ROOT/tools/xsdk/store.json")
+python3 "$XSDK/tools/elf2xex.py" --title-id "$TITLE_ID" --title-name "$TITLE_NAME" --version "$VERSION" ctr360.elf default.xex
 "$XSDK_TOOLCHAIN/bin/powerpc-xsdk-elf-readelf" -h ctr360.elf
 python3 "$ROOT/tools/xsdk/verify_binary.py" --elf ctr360.elf --xex default.xex --toolchain "$XSDK_TOOLCHAIN"
 mkdir -p licenses

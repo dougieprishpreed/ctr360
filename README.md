@@ -22,15 +22,17 @@ The repository contains source code and conversion tools. It does not include th
 
 ### Download a build
 
-Download the package ZIP from the repository's latest **Release**. On Windows:
+Download `CTR360-Xbox360-<version>.zip` from the repository's latest **Release**. On Windows:
 
 1. Unzip it and double-click `Convert disc image.bat`.
-2. Choose your disc image, the `.cue` or the `.bin`, or drop it onto the `.bat`. Your image is only read; the converted copy is written to `ctr360-xsdk\assets\ctr-u.bin`. Conversion takes a few minutes and about 700 MB of free space.
-3. Copy the whole `ctr360-xsdk` folder to writable USB/HDD storage, then launch `default.xex` from your dashboard.
+2. Choose your disc image, the `.cue` or the `.bin`, or drop it onto the `.bat`. Your image is only read; the converted copy is written to `apps\ctr360\assets\ctr-u.bin`. Conversion takes a few minutes and about 700 MB of free space.
+3. Copy the `apps` folder to the root of the console's hard drive, the drive FTP shows as `Hdd1`; if an `apps` folder is already there, copy `ctr360` into it instead. A folder on USB storage works too. Then start `apps\ctr360\default.xex` from your dashboard.
 
 The converter needs no installation: it includes the official Python embeddable package.
 
-Every update to `main` is also built by GitHub Actions. Open the repository's **Actions** tab, choose the latest successful **xSDK build** run, and download its `ctr360-xex` artifact (downloads require a GitHub login). It contains only `default.xex`, its license notices, and an example configuration, for staging the folder yourself as described below.
+Each release also carries `ctr360-<version>.zip`, the package the [Homebrew App Store](https://github.com/xenosworks/homebrew-app-store) installs into `hdd:\apps\ctr360\`. When the store installs CTR360, convert your image with the release zip as above and copy only `assets\ctr-u.bin` to `hdd:\apps\ctr360\assets\` on the console. Back + Start then returns to the store.
+
+Every update to `main` is also built by GitHub Actions. Open the repository's **Actions** tab, choose the latest successful **xSDK build** run, and download its artifacts (downloads require a GitHub login): `ctr360-xex` contains only `default.xex`, its license notices, and an example configuration, for staging the folder yourself as described below; `ctr360-release` contains both release zips and the store's catalogue entry.
 
 ### Build it yourself
 
@@ -107,7 +109,7 @@ Use CTR's normal save/load menus. CTR360 creates its own virtual memory-card fil
 
 ## Updating
 
-Replace `default.xex`, and the converted image if you created a new one, while **keeping your existing `memcards/` folder** and `ctr360.ini`. With the Windows package, convert your image in the new package too, then copy its `ctr360-xsdk` folder over the old one. It contains no saves, so `memcards/` is kept; it does include a default `ctr360.ini`, so skip replacing that file to keep your own settings. Rerunning `stage.py` on an existing folder preserves both as well. Do not delete the old game folder before copying an update unless you have backed up its saves.
+Replace `default.xex`, and the converted image if you created a new one, while **keeping your existing `memcards/` folder** and `ctr360.ini`. With the release zip, copy its `apps\ctr360` folder over your game folder, including a `ctr360-xsdk` folder from an earlier release. It contains neither saves nor `ctr360.ini`, so both are kept, and you only need to convert your image again when the release notes say so. The Homebrew App Store updates its install the same way. Rerunning `stage.py` on an existing folder preserves both as well. Do not delete the old game folder before copying an update unless you have backed up its saves.
 
 ## Configuration
 
@@ -139,6 +141,8 @@ The `[controls]` section maps original PlayStation buttons to Xbox controls for 
 **Saving fails or reports a full card.** Check that `memcards/` can be created and written beside `default.xex`, and that the drive has free space. Back up existing saves before investigating or replacing card files.
 
 **Performance is uneven.** Try `interpolation = 2`, then `0`. When reporting a problem, include the course, mode, how to reproduce it, and the build used. The game writes `default.log` beside `default.xex`; include it when available.
+
+**Taking screenshots.** Add a `[debug]` section with `screenshot = 1` to `ctr360.ini`. Back + LB + RB then writes the current frame, 1280×720 before edge smoothing, to `screenshot_NNN.bmp` beside `default.xex`.
 
 **Graphics look wrong.** Add a `[debug]` section with `self_test = 1` to `ctr360.ini`. The game then checks the console's rendering at startup and records the results in `default.log`; include that log in your report, then remove the setting again.
 

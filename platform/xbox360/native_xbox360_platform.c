@@ -16,6 +16,10 @@
  */
 
 #include <xtl.h>
+#if defined(CTR_XSDK)
+#include <string.h>
+#include <xsdk/xam.h>
+#endif
 
 #include <macros.h>
 #include <platform.h>
@@ -134,12 +138,28 @@ void Platform_Init(const char *title, int width, int height)
 
 void Platform_Exit(int status)
 {
+#if defined(CTR_XSDK)
+	/* Started by the Homebrew App Store, whose launch data is its own path
+	 * ended by a 0: go back there instead of to the dashboard. */
+	char store[XSDK_LAUNCH_DATA_MAX_BYTES];
+	const size_t storeBytes = xsdk_launch_data(store, sizeof store);
+	const int toStore = storeBytes != 0 && memchr(store, '\0', storeBytes) != NULL;
+#else
+	const int toStore = 0;
+#endif
 	/* XDK CRT exit/return-to-CRT terminates with KeBugCheck, not a title
 	 * switch. Use the same explicit dashboard launch as the quit chord. */
-	Platform_Log("[CTR Native] returning to dashboard status=%d\n", status);
+	Platform_Log("[CTR Native] returning to %s status=%d\n", toStore ? "the store" : "dashboard", status);
 	Platform_LogFlush();
 	Platform_Shutdown();
 	Platform_LogShutdown();
+#if defined(CTR_XSDK)
+	/* Returns only if the store can't be started; the dashboard then. */
+	if (toStore)
+	{
+		xsdk_launch(store, NULL, 0);
+	}
+#endif
 	XLaunchNewImage(NULL, NULL);
 	for (;;)
 	{
@@ -360,9 +380,23 @@ void Platform_PollHostEvents(void)
 		const WORD quitChord = XINPUT_GAMEPAD_BACK | XINPUT_GAMEPAD_START;
 		if ((state.Gamepad.wButtons & quitChord) == quitChord)
 		{
-			Platform_Log("[CTR Native] quit chord pressed, leaving to dashboard\n");
+			Platform_Log("[CTR Native] quit chord pressed\n");
 			Platform_Exit(0);
 		}
+#if defined(CTR_XSDK)
+		/* Screenshots for the store ([debug] screenshot = 1): Back + LB + RB, once per press. */
+		{
+			extern void NativeRenderer_RequestCapture(void);
+			const WORD captureChord = XINPUT_GAMEPAD_BACK | XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_RIGHT_SHOULDER;
+			static int captureHeld;
+			const int held = (state.Gamepad.wButtons & captureChord) == captureChord;
+			if (held && !captureHeld)
+			{
+				NativeRenderer_RequestCapture();
+			}
+			captureHeld = held;
+		}
+#endif
 	}
 }
 

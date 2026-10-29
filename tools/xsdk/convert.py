@@ -1,8 +1,9 @@
 """CTR360 disc converter for the portable Windows package.
 
 Converts your own Crash Team Racing (USA) disc image into the byte order the
-Xbox 360 build reads and writes ctr360-xsdk\\assets\\ctr-u.bin beside the
-converter folder. The original image is only read.
+Xbox 360 build reads and writes apps\\ctr360\\assets\\ctr-u.bin beside the
+converter folder, in the app folder as it goes on the console. The original
+image is only read.
 
 Run "Convert disc image.bat" and choose the image, or drop its .cue or .bin
 onto the .bat. package.py lays out the package; in the source tree the cooker
@@ -199,14 +200,15 @@ def convert(disc, game, replace):
         print('It matches the image this release was tested with.')
     else:
         print('Your dump differs from the one this release was tested with, but every conversion check passed.')
-    print('\nNext, copy the whole %s folder to writable USB or HDD storage on your Xbox 360\n'
-          'and launch default.xex from your dashboard.' % game.name)
+    print('\nNext, copy the apps folder to the root of your Xbox 360\'s hard drive (Hdd1 over FTP)\n'
+          'and start apps\\%s\\default.xex. If the Homebrew App Store installed CTR360, copy\n'
+          'only assets\\ctr-u.bin to hdd:\\apps\\%s\\assets\\ on the console.' % (game.name, game.name))
 
 
 def main():
     ap = argparse.ArgumentParser(description='Convert your Crash Team Racing (USA) disc image for CTR360.')
     ap.add_argument('image', nargs='?', type=Path, help='.cue or raw .bin; a file dialog opens when omitted')
-    ap.add_argument('--game', type=Path, default=HERE.parent / 'ctr360-xsdk',
+    ap.add_argument('--game', type=Path, default=HERE.parent / 'apps' / 'ctr360',
                     help='game folder that receives assets/ctr-u.bin')
     ap.add_argument('--yes', action='store_true', help='replace an existing converted image without asking')
     a = ap.parse_args()

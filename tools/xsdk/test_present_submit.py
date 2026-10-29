@@ -21,6 +21,7 @@ static VkRect2D xvPicture={{0,0},{XV_WIDTH,XV_HEIGHT}};
 typedef struct {uint32_t drawn_back,clear_resolves,resolves_put_off,late_resolves;} V4xEdramCounts;
 static V4xEdramCounts v4x_edram_counts(void){V4xEdramCounts c={0};return c;}
 static int quadX,quadW,bars;
+static int xvCaptureRequested;static unsigned shots;
 static struct {unsigned submits,uploads,reads,draws,passes,shaderDraws[7],quads[4];unsigned submitMS,waitMS,frameWaitMS,acquireMS,presentMS;unsigned blendDraws[5],uiDraws,feedbackRequests,midpointFeedbackSkips,skippedSTPPasses;unsigned gpuFrames,gpuTotalUS,gpuMaxUS,gpuOver16;} xvCost;
 static int xvEdgeAA=1;
 static unsigned phase,submits,quads,modeSeen;
@@ -34,6 +35,8 @@ static unsigned GetTickCount(void){return 1;}
 static void Platform_Log(const char *format,...){}
 static void NativeRenderer_UpdateVRAM(void){}
 static void XvSubmit(void){assert(0);}
+/* The screenshot reads main before acquisition, while it holds the finished frame. */
+static void XvWriteScreenshot(void){assert(phase==0 && xv.mainResolved);shots++;}
 static void XvSubmitFrame(void){assert(phase==4);phase=5;submits++;xvCost.submits++;}
 static void XvQuad(XvTarget *to,XvTarget *from,int mode,int x,int y,int w,int h,float sx,float sy,float sw,float sh){assert(phase==3 && to==&xv.swap[1]);assert(from==(xv.mainResolved?&xv.main:&xv.vram));modeSeen=mode;quads++;phase=4;quadX=x;quadW=w;}
 static void XvLayout(XvTarget *target,VkImageLayout layout){assert(phase==4 && target==&xv.swap[1] && layout==VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);}
@@ -57,6 +60,11 @@ int main(void){
  xvPicture=(VkRect2D){{160,0},{960,XV_HEIGHT}};
  phase=0;xv.mainResolved=0;NativeRenderer_PresentVRAMRect(0,0,512,216);assert(phase==6 && quadX==160 && quadW==960 && bars==1);
  phase=0;xv.mainResolved=1;NativeRenderer_PresentVRAMRect(0,0,512,216);assert(phase==6 && quadX==0 && quadW==XV_WIDTH && bars==1);
+ /* A requested screenshot waits for a finished main picture, then is taken once. */
+ assert(shots==0);xvCaptureRequested=1;
+ phase=0;xv.mainResolved=0;NativeRenderer_PresentVRAMRect(0,0,512,216);assert(shots==0 && xvCaptureRequested);
+ phase=0;xv.mainResolved=1;NativeRenderer_PresentVRAMRect(0,0,512,216);assert(shots==1 && !xvCaptureRequested && phase==6);
+ phase=0;NativeRenderer_PresentVRAMRect(0,0,512,216);assert(shots==1);
  puts("PASS: combined render/present frame submission, separate acquire fence reset before submit, present queued behind it, raw/AA/VRAM paths; 4:3 VRAM presents keep black bars");
 }
 '''

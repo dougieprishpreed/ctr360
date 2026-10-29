@@ -63,6 +63,9 @@ static int xvSelfTest;
  * 720p image: the console's scaler narrows it to 4:3 itself. */
 static float xvSqueeze=1;
 static VkRect2D xvPicture={{0,0},{XV_WIDTH,XV_HEIGHT}};
+/* [debug] screenshot = 1: Back + LB + RB writes the next finished frame's 720p
+ * picture (before edge AA) to game:/screenshot_NNN.bmp, for store screenshots. */
+static int xvScreenshots,xvCaptureRequested;
 /* Fills of the displayed draw area wait for the next VRAM pass, where the frame's
  * pack draws over them. Drawn at once, each fill switched the GPU to VRAM and back
  * mid-frame: a resolve and a redraw of the 720p target in eDRAM each time. Every
@@ -421,7 +424,11 @@ static void XvCreatePasses(void)
 static void XvConfig(const char *section,const char *key,const char *value,void *context)
 {
     (void)context;
-    if(!strcmp(section,"debug")){if(!strcmp(key,"self_test"))xvSelfTest=value[0]=='1';return;}
+    if(!strcmp(section,"debug")){
+        if(!strcmp(key,"self_test"))xvSelfTest=value[0]=='1';
+        if(!strcmp(key,"screenshot"))xvScreenshots=value[0]=='1';
+        return;
+    }
     if(strcmp(section,"graphics"))return;
     // interpolation = 2 keeps menus, the hub, cutscenes and results at 30 FPS.
     if(!strcmp(key,"interpolation") && !strcmp(value,"2")){g_nativeHDEnableInterpolation=2;return;}
@@ -438,9 +445,9 @@ int NativeRenderer_InitialiseRender(char *name,int width,int height,int fullscre
     NativeConfig_Read("game:/ctr360.ini",XvConfig,NULL);
     VIDEO_MODE video={0};VdQueryVideoMode(&video);
     NativeHD_WidenSplitScreenHud();
-    Platform_Log("[graphics] interpolation=%d texture_filter=%d edge_aa=%d widescreen=%d output=%ux%u%s self_test=%d\n",
+    Platform_Log("[graphics] interpolation=%d texture_filter=%d edge_aa=%d widescreen=%d output=%ux%u%s self_test=%d screenshot=%d\n",
         g_nativeHDEnableInterpolation,g_cfg_bilinearFiltering,xvEdgeAA,g_nativeHDWidescreen,
-        (unsigned)video.display_width,(unsigned)video.display_height,video.is_widescreen?" widescreen":"",xvSelfTest);
+        (unsigned)video.display_width,(unsigned)video.display_height,video.is_widescreen?" widescreen":"",xvSelfTest,xvScreenshots);
     const char *instanceExtensions[]={VK_KHR_SURFACE_EXTENSION_NAME,VK_KHR_DISPLAY_EXTENSION_NAME};
     const char *deviceExtensions[]={VK_KHR_SWAPCHAIN_EXTENSION_NAME};
     VkApplicationInfo app={.sType=VK_STRUCTURE_TYPE_APPLICATION_INFO,.pApplicationName="ctr360 xSDK experimental",.apiVersion=VK_API_VERSION_1_0};
@@ -784,9 +791,39 @@ void NativeRenderer_StoreFeedback(int x,int y,int w,int h)
     if(xv.mainValid && g_nativeHDIntermediate)xvCost.midpointFeedbackSkips++;
     NativeRenderer_StoreFrameBuffer(x,y,w,h);
 }
+void NativeRenderer_RequestCapture(void) { if(xvScreenshots)xvCaptureRequested=1; }
+static void XvWriteScreenshot(void)
+{
+    XvReadTarget(&xv.main);
+    char path[40];FILE *file=NULL;
+    for(unsigned n=0;n<1000 && !file;n++){
+        snprintf(path,sizeof(path),"game:/screenshot_%03u.bmp",n);
+        FILE *existing=fopen(path,"rb");
+        if(existing){fclose(existing);continue;}
+        file=fopen(path,"wb");
+    }
+    if(!file){Platform_LogWarn("[screenshot] no file could be written\n");return;}
+    /* 24-bit bottom-up BMP; 1280*3 bytes per row needs no padding. */
+    unsigned row=XV_WIDTH*3,size=54+row*XV_HEIGHT;
+    unsigned char header[54]={'B','M'};
+    unsigned fields[][2]={{2,size},{10,54},{14,40},{18,XV_WIDTH},{22,XV_HEIGHT},{34,row*XV_HEIGHT},{38,2835},{42,2835}};
+    for(unsigned i=0;i<sizeof(fields)/sizeof(fields[0]);i++)
+        for(unsigned k=0;k<4;k++)header[fields[i][0]+k]=(unsigned char)(fields[i][1]>>(8*k));
+    header[26]=1;header[28]=24;fwrite(header,1,54,file);
+    static unsigned char line[XV_WIDTH*3];
+    for(int y=XV_HEIGHT-1;y>=0;y--){
+        const unsigned char *src=xv.staging.map+(size_t)y*XV_WIDTH*4;
+        for(int x=0;x<XV_WIDTH;x++){line[3*x]=src[4*x+2];line[3*x+1]=src[4*x+1];line[3*x+2]=src[4*x];}
+        fwrite(line,1,row,file);
+    }
+    fclose(file);
+    Platform_Log("[screenshot] %s\n",path);
+}
 void NativeRenderer_PresentVRAMRect(int x,int y,int w,int h)
 {
     if(w<=0 || h<=0)return;NativeRenderer_UpdateVRAM();
+    /* A screenshot reads the finished picture before this frame is presented. */
+    if(xvCaptureRequested && xv.mainResolved){xvCaptureRequested=0;XvWriteScreenshot();}
     /* Acquisition can precede this frame's submit: render, resolve and
      * presentation stay in queue order, and the flip waits for the frame's
      * fence. The previous frame may still be drawing; its slot is separate. */

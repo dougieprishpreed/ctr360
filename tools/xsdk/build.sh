@@ -59,6 +59,7 @@ if [ "${SCREENSHOTS:-0}" = 1 ]; then FLAGS+=(-DCTR360_SCREENSHOTS=1); fi
 if [ "${FREEZE_TRACE:-0}" = 1 ]; then FLAGS+=(-DCTR360_FREEZE_TRACE=1); fi
 # The disc conversion's recipe, built into the XEX (platform/xsdk/native_xsdk_disc_cook.c).
 FLAGS+=(-DCTR360_COOK_RECIPE="\"$ROOT/platform/xsdk/cook_recipe.bin\"")
+FLAGS+=(-DCTR360_ENTRY_PATCHES="\"$ROOT/platform/xsdk/entry_patches.bin\"")
 "$CC" "${FLAGS[@]}" -c "$GEN/platform/xsdk/main_xsdk.c" -o ctr360.o
 "$CC" "${FLAGS[@]}" -c ctr_shaders.c -o ctr_shaders.o
 "$CC" -mcpu=cell -fno-pic -static -nostdlib -T "$XSDK/src/xsdk.ld" \

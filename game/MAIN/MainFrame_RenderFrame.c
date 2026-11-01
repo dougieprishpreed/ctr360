@@ -31,6 +31,22 @@ static void MainFrame_TraceLateRender(const char *step)
 #endif
 }
 
+#if defined(CTR_NATIVE)
+#include <platform/native_renderer.h>
+
+// Native still renders immediately through PsyCross, so keep the host GPU's
+// active draw/display envs in step with the retail DB selected this frame.
+static void RenderSubmit_DrawNative(struct GameTracker *gGT)
+{
+	PutDrawEnv(&gGT->backBuffer->drawEnv);
+	gGT->frontBuffer = &gGT->db[1 - gGT->swapchainIndex];
+	PutDispEnv(&gGT->frontBuffer->dispEnv);
+
+	gGT->bool_DrawOTag_InProgress = 1;
+	DrawOTag(&gGT->pushBuffer[0].ptrOT[0x3ff]);
+}
+#endif
+
 void MainFrame_RenderFrame(struct GameTracker *gGT, struct GamepadSystem *gGamepads)
 {
 	struct Level *lev = gGT->level1;
@@ -251,6 +267,14 @@ void MainFrame_RenderFrame(struct GameTracker *gGT, struct GamepadSystem *gGamep
 	MAINFRAME_PERF_END(NATIVE_PERF_BUCKET_MAINFRAME_UI);
 
 	MAINFRAME_PERF_BEGIN(NATIVE_PERF_BUCKET_MAINFRAME_RENDER_VSYNC);
+#if defined(CTR_XSDK)
+	// NOTE: The console draws the frame before its VBlank and gives the GPU
+	// the scene then, to draw while the CPU waits; after the wait RenderSubmit
+	// only flips. Drawn after the wait, as retail does, the GPU sat idle
+	// through it.
+	RenderSubmit_DrawNative(gGT);
+	NativeRenderer_SubmitScene();
+#endif
 	MainFrame_TraceLateRender("vsync-enter");
 	RenderVSYNC(gGT);
 	MainFrame_TraceLateRender("vsync-exit");
@@ -1387,11 +1411,10 @@ void RenderSubmit(struct GameTracker *gGT)
 
 	sdata->vsyncTillFlip = 2;
 
-	// Native still renders immediately through PsyCross, so keep the host GPU's
-	// active draw/display envs in step with the retail DB selected this frame.
-	PutDrawEnv(&gGT->backBuffer->drawEnv);
-	gGT->frontBuffer = &gGT->db[1 - gGT->swapchainIndex];
-	PutDispEnv(&gGT->frontBuffer->dispEnv);
+#if !defined(CTR_XSDK)
+	// The console drew the frame before its VBlank wait (MainFrame_RenderFrame).
+	RenderSubmit_DrawNative(gGT);
+#endif
 
 #else
 
@@ -1412,13 +1435,13 @@ void RenderSubmit(struct GameTracker *gGT)
 	// swap=0, get db[1]
 	// swap=1, get db[0]
 	gGT->frontBuffer = &gGT->db[1 - gGT->swapchainIndex];
-#endif
 
 	gGT->bool_DrawOTag_InProgress = 1;
 
 	void *ot = &gGT->pushBuffer[0].ptrOT[0x3ff];
 
 	DrawOTag(ot);
+#endif
 
 	gGT->frameTimer_notPaused = gGT->frameTimer_VsyncCallback;
 

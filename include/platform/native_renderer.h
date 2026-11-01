@@ -9,6 +9,9 @@ void NativeRenderer_Shutdown(void);
 void NativeRenderer_ResetDevice(void);
 void NativeRenderer_BeginScene(void);
 void NativeRenderer_EndScene(void);
+/* Gives the GPU the frame's scene before the VBlank wait; the present then adds the rest (the console's; a no-op
+ * elsewhere). */
+void NativeRenderer_SubmitScene(void);
 void NativeRenderer_EndGpuFrame(void);
 void NativeRenderer_FinishGpuMeasurements(void);
 void NativeRenderer_UpdateSwapIntervalState(int swapInterval);

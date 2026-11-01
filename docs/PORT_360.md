@@ -166,7 +166,16 @@ Approach: **offline cooking of the user's disc image, in place.**
   1.4 MB, built into the XEX). A first start without `assets/ctr-u.bin`
   copies the player's `.bin` through it (`platform/native_disc_cook.c`) and
   keeps the copy only when its CRC-32 is that of the PC cooker's image
-  (SHA-256 8409cc0c...), then deletes the `.bin` and `.cue`.
+  (SHA-256 c4c8d6ec...), then deletes the `.bin` and `.cue`.
+- Until 1.0.4.0 the cooker passed over pointer maps under 16 words as
+  raw data, which left Pinstripe's boss heads (BIGFILE 454, 455, 464, 465)
+  as on the disc, and Citadel City's boss scene stopped the console on them.
+  A small map now counts when the file is a whole standalone Model, and an
+  entry with a map that stays as on the disc fails the conversion. Images
+  converted before (8409cc0c...) keep working: `make_cook_recipe.py
+  --entry-patches` records those entries' fields
+  (`platform/xsdk/entry_patches.bin`), and the game reverses them in memory
+  as it reads an entry whose CRC-32 is the old one.
   `test_disc_cook.py` checks the replay on synthetic discs and, given the
   dump, that the console code makes the PC cooker's image byte for byte.
 

@@ -29,6 +29,10 @@ void Platform_WaitUntilVBlank(int targetVBlank);
 /* Emits the VBlanks already due without waiting for another (the console's
  * clock; a no-op on the PC, whose replays count its VSync calls). */
 void Platform_CatchUpVBlanks(void);
+/* A BIGFILE entry just read into bytes: the console fixes the few entries
+ * that images converted before 1.0.4.0 kept as on the disc (a no-op on the
+ * PC, which reads the disc's own byte order). */
+void Platform_FixLoadedFile(int entry, void *bytes, int length);
 void Platform_PollHostEvents(void);
 int Platform_PollInput(void);
 

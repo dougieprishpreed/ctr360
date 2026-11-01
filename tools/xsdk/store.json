@@ -11,7 +11,7 @@
     "category": "ports",
     "sentence": "The PC port of a classic PlayStation kart racer, at 1280x720 and up to 60 fps.",
     "needs": "Your CTR (USA) .bin beside it, once",
-    "changes": "Converts your disc image on the console on its first start, so no PC is needed; Back + Start goes to the dashboard.",
+    "changes": "Converts your disc image on the console, so no PC is needed; fixes the freeze at Citadel City's boss; Back + Start goes to the dashboard.",
     "source": "https://github.com/dougieprishpreed/ctr360",
     "license": "GPL-3.0",
     "screenshot": "shots/ctr360.png",

@@ -386,6 +386,15 @@ int NativeDiscImage_Init(const char *assetsDir)
 #endif
 		return 0;
 	}
+#if defined(CTR_XSDK)
+	{
+		/* newlib's BUFSIZ is 1 KB and xsdk's fstat gives no block size, so each
+		 * refill was one 1 KB USB request: a 16-sector read took 37, loading
+		 * at about 4 MB/s. A 64 KB buffer takes a batch in one or two. */
+		static char s_nativeDiscImageBuffer[64 * 1024];
+		setvbuf(s_nativeDiscImageFile, s_nativeDiscImageBuffer, _IOFBF, sizeof(s_nativeDiscImageBuffer));
+	}
+#endif
 
 #if defined(_XBOX)
 	Platform_Log("[boot] disc-root begin\n");

@@ -217,6 +217,83 @@ static uint32_t DiscCook_Crc32(uint32_t crc, const unsigned char *bytes, size_t 
     return ~crc;
 }
 
+/* Reverses each element of the runs in bytes, whose first byte is offset 0;
+ * with bytes NULL only checks they stay inside length. 0 if they don't, or
+ * the instructions are damaged, or they aren't runs runs. */
+static int DiscCook_PatchRuns(const unsigned char *at, const unsigned char *end, uint32_t runs, unsigned char *bytes,
+                              uint32_t length)
+{
+    struct DiscCookCursor c;
+    int got;
+    memset(&c, 0, sizeof(c));
+    c.at = at;
+    c.end = end;
+    while ((got = DiscCook_NextRun(&c)) == 1)
+    {
+        if (c.dataEnd > length) return 0;
+        if (bytes == NULL) continue;
+        for (; c.left; c.left--, c.next += c.element)
+        {
+            unsigned char *e = bytes + c.next, t = e[0];
+            if (c.element == 2)
+            {
+                e[0] = e[1];
+                e[1] = t;
+            }
+            else
+            {
+                e[0] = e[3];
+                e[3] = t;
+                t = e[1];
+                e[1] = e[2];
+                e[2] = t;
+            }
+        }
+    }
+    return got == 0 && c.runs == runs;
+}
+
+int NativeDiscCook_PatchEntry(const void *patches, size_t patchBytes, uint32_t entry, unsigned char *bytes,
+                              size_t length)
+{
+    const unsigned char *at = patches, *end = at + patchBytes;
+    uint32_t records, r, i;
+    if (patchBytes < 12 || memcmp(at, "CTRP", 4) != 0 || DiscCook_Read32(at + 4) != DISC_COOK_VERSION) return -1;
+    records = DiscCook_Read32(at + 8);
+    at += 12;
+    for (r = 0; r < records; r++)
+    {
+        uint32_t count, size, before, after, runs, body;
+        int mine = 0;
+        if (end - at < 4) return -1;
+        count = DiscCook_Read32(at);
+        at += 4;
+        if (count > (size_t)(end - at) / 4) return -1;
+        for (i = 0; i < count; i++) mine |= DiscCook_Read32(at + 4 * i) == entry;
+        at += 4 * count;
+        if (end - at < 20) return -1;
+        size = DiscCook_Read32(at);
+        before = DiscCook_Read32(at + 4);
+        after = DiscCook_Read32(at + 8);
+        runs = DiscCook_Read32(at + 12);
+        body = DiscCook_Read32(at + 16);
+        at += 20;
+        if (body > (size_t)(end - at)) return -1;
+        if (mine)
+        {
+            if (length < size || DiscCook_Crc32(0, bytes, size) != before) return 0;
+            if (!DiscCook_PatchRuns(at, at + body, runs, NULL, size)) return -1;
+            DiscCook_PatchRuns(at, at + body, runs, bytes, size);
+            if (DiscCook_Crc32(0, bytes, size) == after) return 1;
+            /* Each reversal is its own inverse: put the bytes back. */
+            DiscCook_PatchRuns(at, at + body, runs, bytes, size);
+            return -1;
+        }
+        at += body;
+    }
+    return 0;
+}
+
 static int DiscCook_ReadAll(int file, unsigned char *at, size_t length)
 {
     while (length > 0)

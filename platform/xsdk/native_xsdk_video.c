@@ -41,8 +41,8 @@ static struct {
     VkInstance instance;VkPhysicalDevice physical;VkDevice device;VkQueue queue;
     VkSurfaceKHR surface;VkSwapchainKHR swapchain;unsigned imageCount;
     XvTarget swap[3],main,off,vram;
-    VkRenderPass passes[4];VkCommandPool pool;VkCommandBuffer command,commands[2];VkFence fence,fences[2],acquireFence;
-    unsigned slot;int pending[2],stamped[2];VkQueryPool timestamps;float timestampPeriod;
+    VkRenderPass passes[4];VkCommandPool pool;VkCommandBuffer command,commands[2],presents[2];VkFence fence,fences[2],acquireFence;
+    unsigned slot;int pending[2],stamped[2],sceneQueued;VkQueryPool timestamps;float timestampPeriod;
     VkDescriptorSetLayout setLayout;VkPipelineLayout pipelineLayout;VkDescriptorPool descriptors;
     VkDescriptorSet sets[4];VkSampler sampler,linearSampler,vramSampler;
     VkShaderModule shaders[20];VkPipeline pipelines[3][18][5][3];
@@ -84,9 +84,11 @@ static struct {
     unsigned submits,uploads,reads,draws,passes,shaderDraws[7],quads[4];
     unsigned submitMS,waitMS,frameWaitMS,acquireMS,presentMS;
     unsigned blendDraws[5],uiDraws,feedbackRequests,midpointFeedbackSkips,skippedSTPPasses;
-    unsigned gpuFrames,gpuTotalUS,gpuMaxUS,gpuOver16;
+    unsigned gpuFrames,gpuTotalUS,gpuMaxUS,gpuOver16,earlyScenes;
 } xvCost;
-/* [graphics] steady = 1: a frame's GPU work starts at the refresh its last
+/* [graphics] steady = 1 (off by default: on the console a steady 30 felt
+ * worse than 60 with some repeats, and a GPU near its limit switched it every
+ * hold): a frame's GPU work starts at the refresh its last
  * frame shows at, so a frame longer than a refresh shows a refresh late; with
  * an in-between frame each such update takes a refresh more, and the game's
  * 30 updates a second come unevenly. While the GPU's recent frames average
@@ -94,7 +96,7 @@ static struct {
  * refreshes long, until they average under XV_STEADY_ON_US again; each way
  * holds XV_STEADY_HOLD_MS at least. The average is over about 16 frames. */
 enum { XV_STEADY_OFF_US=15500, XV_STEADY_ON_US=14000, XV_STEADY_HOLD_MS=2000 };
-static int xvSteady=1,xvSteadyOff;
+static int xvSteady=0,xvSteadyOff;
 static unsigned xvGpuRecentUS,xvSteadySince,xvSteadySwitches;
 int NativeRenderer_MidpointsFit(void) { return !xvSteadyOff; }
 static void XvSteadyFrame(unsigned us)
@@ -207,13 +209,16 @@ static void XvBegin(void)
     if(xv.recording)return;
     VkCommandBufferBeginInfo begin={.sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,.flags=VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
     XV_CALL(vkBeginCommandBuffer(xv.command,&begin));xv.recording=1;
-    XvStampStart();
+    if(!xv.sceneQueued)XvStampStart();
 }
 static void XvEndPass(void) { if(xv.inPass){vkCmdEndRenderPass(xv.command);xv.inPass=0;} }
-/* Each frame slot owns a command buffer, its fence and half of the vertex and
- * uniform storage. The queue replays in order, so a slot's fence also covers
- * every earlier submission. xsdk_present_end flips only after a frame's fence. */
-static void XvQueue(void)
+/* Each frame slot owns a command buffer for the scene and one for its
+ * present, its fence and half of the vertex and uniform storage. The queue
+ * replays in order, so a slot's fence also covers every earlier submission.
+ * xsdk_present_end flips only after a frame's fence. A scene submitted
+ * early (NativeRenderer_SubmitScene) has no fence of its own: the present's
+ * covers it. */
+static void XvQueue(VkFence fence)
 {
     XvEndPass();XV_CALL(vkEndCommandBuffer(xv.command));
     VkSubmitInfo submit={.sType=VK_STRUCTURE_TYPE_SUBMIT_INFO,.commandBufferCount=1,.pCommandBuffers=&xv.command};
@@ -222,9 +227,10 @@ static void XvQueue(void)
         {.sType=VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,.memory=xv.uniforms.memory,.size=VK_WHOLE_SIZE}};
     if(xv.vertices.memory)XV_CALL(vkFlushMappedMemoryRanges(xv.device,2,ranges));
     unsigned started=GetTickCount();
-    XV_CALL(vkQueueSubmit(xv.queue,1,&submit,xv.fence));
+    XV_CALL(vkQueueSubmit(xv.queue,1,&submit,fence));
     xvCost.submits++;xvCost.submitMS+=GetTickCount()-started;
-    xv.pending[xv.slot]=1;xv.recording=0;
+    if(fence)xv.pending[xv.slot]=1;
+    xv.recording=0;
 }
 static unsigned XvWait(unsigned slot)
 {
@@ -235,25 +241,42 @@ static unsigned XvWait(unsigned slot)
     XvStampRead(slot);
     XV_CALL(vkResetFences(xv.device,1,&xv.fences[slot]));
     XV_CALL(vkResetCommandBuffer(xv.commands[slot],0));
+    XV_CALL(vkResetCommandBuffer(xv.presents[slot],0));
     xv.pending[slot]=0;return waited;
 }
-/* Drain: the other slot's frame first, then this slot's work. */
+/* Drain: the other slot's frame first, then this slot's work, an early scene
+ * included: an empty present carries the fence for it. */
 static void XvSubmit(void)
 {
     XvWait(xv.slot^1);
-    if(xv.recording)XvQueue();
+    if(xv.sceneQueued && !xv.recording)XvBegin();
+    if(xv.recording)XvQueue(xv.fence);
     XvWait(xv.slot);
+    xv.command=xv.commands[xv.slot];xv.sceneQueued=0;
     xv.uniformCursor=xv.slot*XV_UNIFORM_SLOT_BYTES;
 }
 /* Queue the presented frame without waiting. Record the next one into the
  * other slot once the previously presented frame, its last user, is done. */
 static void XvSubmitFrame(void)
 {
-    XvEndPass();XvStampEnd();
-    XvQueue();
-    xv.slot^=1;xv.command=xv.commands[xv.slot];xv.fence=xv.fences[xv.slot];
+    XvEndPass();if(!xv.sceneQueued)XvStampEnd();
+    XvQueue(xv.fence);
+    xv.slot^=1;xv.command=xv.commands[xv.slot];xv.fence=xv.fences[xv.slot];xv.sceneQueued=0;
     xvCost.frameWaitMS+=XvWait(xv.slot);
     xv.uniformCursor=xv.slot*XV_UNIFORM_SLOT_BYTES;
+}
+/* The frame's scene, queued before the game waits for its VBlank: the GPU
+ * draws it while the CPU waits, then the present adds only the copy to the
+ * swapchain image after the acquire. Queued at the acquire instead, as every
+ * frame was, the GPU sat idle through that wait. The GPU's frame time is the
+ * scene's. */
+void NativeRenderer_SubmitScene(void)
+{
+    if(!xv.recording || xv.sceneQueued)return;
+    XvEndPass();XvStampEnd();
+    XvQueue(VK_NULL_HANDLE);
+    xv.command=xv.presents[xv.slot];xv.sceneQueued=1;
+    xvCost.earlyScenes++;
 }
 static void XvLayout(XvTarget *target,VkImageLayout layout)
 {
@@ -499,6 +522,7 @@ int NativeRenderer_InitialiseRender(char *name,int width,int height,int fullscre
     XV_CALL(vkCreateCommandPool(xv.device,&pool,NULL,&xv.pool));
     VkCommandBufferAllocateInfo command={.sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,.commandPool=xv.pool,.level=VK_COMMAND_BUFFER_LEVEL_PRIMARY,.commandBufferCount=2};
     XV_CALL(vkAllocateCommandBuffers(xv.device,&command,xv.commands));
+    XV_CALL(vkAllocateCommandBuffers(xv.device,&command,xv.presents));
     VkFenceCreateInfo fence={.sType=VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
     for(unsigned i=0;i<2;i++)XV_CALL(vkCreateFence(xv.device,&fence,NULL,&xv.fences[i]));
     XV_CALL(vkCreateFence(xv.device,&fence,NULL,&xv.acquireFence));
@@ -873,8 +897,9 @@ void NativeRenderer_PresentVRAMRect(int x,int y,int w,int h)
     static unsigned lastReport=0,frames=0;frames++;
     unsigned now=GetTickCount();
     if(now-lastReport>=5000){
-        Platform_Log("[vulkan-perf] frames=%u span=%ums draws=%u passes=%u submits=%u submit=%ums wait=%ums uploads=%u reads=%u\n",
-            frames,now-lastReport,xvCost.draws,xvCost.passes,xvCost.submits,xvCost.submitMS,xvCost.waitMS,xvCost.uploads,xvCost.reads);
+        Platform_Log("[vulkan-perf] frames=%u span=%ums draws=%u passes=%u submits=%u early-scenes=%u submit=%ums wait=%ums uploads=%u reads=%u\n",
+            frames,now-lastReport,xvCost.draws,xvCost.passes,xvCost.submits,xvCost.earlyScenes,xvCost.submitMS,xvCost.waitMS,
+            xvCost.uploads,xvCost.reads);
         Platform_Log("[vulkan-perf-detail] transfer-wait=%ums frame-wait=%ums acquire=%ums flip=%ums shaders=%u,%u,%u,%u,%u,%u,%u quads=%u,%u,%u,%u\n",
             xvCost.waitMS-xvCost.frameWaitMS,xvCost.frameWaitMS,xvCost.acquireMS,xvCost.presentMS,
             xvCost.shaderDraws[0],xvCost.shaderDraws[1],xvCost.shaderDraws[2],xvCost.shaderDraws[3],

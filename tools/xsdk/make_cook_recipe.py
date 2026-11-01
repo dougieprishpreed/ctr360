@@ -236,11 +236,55 @@ def decode(recipe):
     return image_bytes, crc, runs
 
 
+PATCH_MAGIC = b'CTRP'
+
+
+def entry_patches(disc, runs, groups):
+    """Patches for BIGFILE entries that images converted before 1.0.4.0 left as on the disc.
+
+    Format, little-endian: char magic[4] = "CTRP"; u32 version = 1; u32 records; then per record
+    u32 entry count, u32 entries[count], u32 entry bytes, u32 CRC-32 before, u32 CRC-32 after,
+    u32 runs, u32 instruction bytes, then the recipe's instructions with offsets from the entry's
+    first byte. The entries of a record hold the same bytes. The game applies a record to an
+    entry it has read only when the entry's CRC-32 is the one before (platform/native_disc_cook.c).
+    """
+    image = disc.read_bytes()
+    big = cook_disc.BigFile(cook_disc.IsoImage(str(disc)))
+    lba, entries = big.lba, big.entries
+    out = bytearray(PATCH_MAGIC + struct.pack('<2I', VERSION, len(groups)))
+    for group in groups:
+        records = []
+        for entry in group:
+            sector, size = entries[entry]
+            start = (lba + sector) * DATA_LEN
+            mine = [(s - start, e, c) for s, e, c in runs if start <= s < start + size]
+            assert all(s + e * c <= size for s, e, c in mine), 'entry %d: a run past its end' % entry
+            data = bytearray(b''.join(image[image_index(start + k * DATA_LEN):image_index(start + k * DATA_LEN) + DATA_LEN]
+                                      for k in range((size + DATA_LEN - 1) // DATA_LEN))[:size])
+            before = zlib.crc32(data) & 0xffffffff
+            for s, e, c in mine:
+                for k in range(c):
+                    data[s + k * e:s + (k + 1) * e] = data[s + k * e:s + (k + 1) * e][::-1]
+            records.append((size, before, zlib.crc32(data) & 0xffffffff, mine))
+        assert all(r == records[0] for r in records), 'entries %s differ' % (group,)
+        size, before, after, mine = records[0]
+        assert mine and before != after
+        body = encode(mine, size, after)[20:]
+        out += struct.pack('<I', len(group)) + struct.pack('<%dI' % len(group), *group)
+        out += struct.pack('<5I', size, before, after, len(mine), len(body)) + body
+        print('entries %s: %d bytes, %d runs, CRC-32 %08x before, %08x after, %d bytes of patch' %
+              (group, size, len(mine), before, after, len(body)))
+    return bytes(out)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--disc', type=Path, required=True, help='the USA dump (.bin, 2352-byte sectors)')
     ap.add_argument('--expect', required=True, help="SHA-256 of the PC converter's image of that dump")
     ap.add_argument('--out', type=Path, required=True, help='the recipe to write')
+    ap.add_argument('--entry-patches', type=Path, help='also write patches for these entries of older images')
+    ap.add_argument('--entries', default='454,455,464,465',
+                    help='entry groups for --entry-patches: a comma-separated list of +-joined entries')
     a = ap.parse_args()
     regions = record(a.disc)
     runs = runs_of(regions)
@@ -260,6 +304,10 @@ def main():
           (len(regions), len(runs), elements, straddling, image_bytes, crc))
     print('replayed image matches %s; recipe %d bytes (%d zipped) -> %s' %
           (digest, len(recipe), len(zlib.compress(recipe, 9)), a.out))
+    if a.entry_patches:
+        groups = [[int(e) for e in group.split('+')] for group in a.entries.split(',')]
+        a.entry_patches.write_bytes(entry_patches(a.disc, runs, groups))
+        print('entry patches -> %s' % a.entry_patches)
 
 
 if __name__ == '__main__':

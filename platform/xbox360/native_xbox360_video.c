@@ -2129,6 +2129,10 @@ void NativeRenderer_FinishGpuMeasurements(void)
 {
 }
 
+void NativeRenderer_SubmitScene(void)
+{
+}
+
 void NativeRenderer_EndScene(void)
 {
 	NativeRenderer_TraceLateIntro("end-scene-enter");

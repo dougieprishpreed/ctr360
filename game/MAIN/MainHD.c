@@ -12,6 +12,7 @@ void NativeGpu_SetHUDCapture(int enabled);
 int NativeGpu_HasHUDCapture(void);
 /* 0 while the GPU can't draw an update's two frames in time ([graphics] steady). */
 int NativeRenderer_MidpointsFit(void);
+void NativeRenderer_SubmitScene(void);
 
 #define NATIVE_HD_INSTANCE_LIMIT 512
 struct NativeHDPose
@@ -377,6 +378,11 @@ void NativeHD_RenderIntermediate(struct GameTracker *gGT)
         /* Consume only the first of the retail frame's two VBlanks. The
          * regular RenderVSYNC handles the remainder before the current pose. */
         Platform_WatchStage("midpoint-present");
+#if defined(CTR_XSDK)
+        /* The GPU draws the scene while the CPU waits for the VBlank. */
+        DrawSync(0);
+        NativeRenderer_SubmitScene();
+#endif
         Platform_WaitUntilVBlank(Platform_GetVBlankCount() + 1);
         DrawSync(0);
         Platform_EndFrame();

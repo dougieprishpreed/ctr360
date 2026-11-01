@@ -28,6 +28,34 @@ __asm__(".section .rodata.ctr360_cook_recipe,\"a\"\n"
         "\t.previous\n");
 extern const unsigned char ctr360CookRecipe[], ctr360CookRecipeEnd[];
 
+/* Pinstripe's boss heads, which images converted before 1.0.4.0 kept as on
+ * the disc (platform/xsdk/entry_patches.bin, from make_cook_recipe.py
+ * --entry-patches): fixed in memory as the game reads them. */
+#ifndef CTR360_ENTRY_PATCHES
+#error "build.sh passes CTR360_ENTRY_PATCHES, the path of platform/xsdk/entry_patches.bin"
+#endif
+__asm__(".section .rodata.ctr360_entry_patches,\"a\"\n"
+        "\t.balign 4\n"
+        "\t.globl ctr360EntryPatches\n"
+        "ctr360EntryPatches:\n"
+        "\t.incbin \"" CTR360_ENTRY_PATCHES "\"\n"
+        "\t.globl ctr360EntryPatchesEnd\n"
+        "ctr360EntryPatchesEnd:\n"
+        "\t.previous\n");
+extern const unsigned char ctr360EntryPatches[], ctr360EntryPatchesEnd[];
+
+void Platform_FixLoadedFile(int entry, void *bytes, int length)
+{
+    int result;
+    if (entry < 0 || bytes == NULL || length <= 0) return;
+    result = NativeDiscCook_PatchEntry(ctr360EntryPatches, (size_t)(ctr360EntryPatchesEnd - ctr360EntryPatches),
+                                       (uint32_t)entry, bytes, (size_t)length);
+    if (result > 0)
+        Platform_Log("[disc] entry %d fixed as read: an image converted before 1.0.4.0 kept it as on the disc\n", entry);
+    else if (result < 0)
+        Platform_LogError("[disc] entry %d: the fix for older images doesn't apply; the XEX may be damaged\n", entry);
+}
+
 #define COOK_FOLDER "game:/"
 #define COOK_IMAGE "game:/assets/ctr-u.bin"
 #define COOK_PART "game:/assets/ctr-u.bin.part"

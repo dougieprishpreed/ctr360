@@ -395,6 +395,10 @@ void NativeRenderer_FinishGpuMeasurements(void)
 #endif
 }
 
+void NativeRenderer_SubmitScene(void)
+{
+}
+
 void NativeRenderer_EndScene(void)
 {
 	if (s_previousOffscreenState)

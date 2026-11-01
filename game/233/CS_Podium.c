@@ -723,7 +723,7 @@ void CS_Podium_FullScene_Init(void)
 	gGT = GAME_TRACKER;
 	gGT->gameMode2 |= VEH_FREEZE_PODIUM;
 #if defined(CTR_NATIVE)
-	Platform_FreezeTraceOpen("podium", 3600, 0);
+	Platform_FreezeTraceOpen("podium", 1, 0);
 	Platform_FreezeTrace("podium: begins, level=%d reward=%d", (int)gGT->levelID, (int)gGT->podiumRewardID);
 #endif
 

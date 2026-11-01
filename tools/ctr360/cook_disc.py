@@ -533,15 +533,22 @@ def dram_swap_sites(raw, entry_index, excluded):
         if 4 + o >= map_at:
             return None
         prev = o
-    if (num_bytes >> 2) < 16:
-        # not enough pointers to be confident; require ascending start instead
-        return None
 
     sites = [(0, 4), (map_at, 4)]
     for i in range(count):
         sites.append((map_at + 4 + i * 4, 4))
     for o in offs:
         sites.append((4 + o, 4))
+    if count < 16:
+        # Too few pointers to be confident on their own. A whole standalone
+        # Model is, though: Pinstripe's boss heads (454/455, 464/465) map 15
+        # and stayed little-endian, so Citadel City's boss scene read them
+        # backwards and stopped the console. Its header graph decides.
+        try:
+            if dram_racer_model_sites(raw, sites, entry_index) is None:
+                return None
+        except ValueError:
+            return None
 
     # No two sites may overlap: an overlapped word would be swapped twice and
     # silently revert to little-endian.
@@ -1854,6 +1861,22 @@ def cook(bin_path, out_path=None, check_only=True):
         converted += 1
         dram_indices.append(entry_index)
         dram_sites += len(sites)
+    # Nothing that reads as a model may stay as on the disc: a skipped one
+    # (Pinstripe's heads, until 1.0.4.0) is read backwards by the game.
+    cooked_entries = set(dram_indices) | excluded
+    for entry_index in range(big.num_entry):
+        offset_sectors, size = big.entries[entry_index]
+        if entry_index in cooked_entries or size < 28:
+            continue
+        raw = iso.read(big.lba + offset_sectors, size)
+        name = raw[4:20].split(b'\0', 1)[0]
+        map_off, = struct.unpack_from('<i', raw, 0)
+        if not name or not all(32 <= b < 127 for b in name) or map_off < 0 or 4 + map_off + 8 > size:
+            continue
+        num_bytes, = struct.unpack_from('<i', raw, 4 + map_off)
+        if 0 < num_bytes and not num_bytes & 3 and 4 + map_off + 4 + num_bytes <= size:
+            raise SystemExit('entry %d (%s) has a pointer map but was left as on the disc'
+                             % (entry_index, name.decode('ascii')))
     print('dram pointer-map entries: %d, %d site(s) total' % (len(dram_indices), dram_sites))
     print('external level maps (level, map, bytes): %s' % (external_maps,))
     print('dram entries (first 24): %s' % (dram_indices[:24],))

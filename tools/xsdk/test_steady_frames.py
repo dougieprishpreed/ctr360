@@ -25,6 +25,7 @@ static unsigned run(unsigned frames,unsigned us){unsigned before=xvSteadySwitche
  for(unsigned i=0;i<frames;i++){ms+=17;XvSteadyFrame(us);}return xvSteadySwitches-before;}
 int main(void){
  ms=10000;
+ assert(xvSteady==0);xvSteady=1;                                      /* off unless the ini turns it on */
  assert(run(300,13000)==0 && NativeRenderer_MidpointsFit());          /* light race: in-between frames */
  assert(run(120,16500)==1 && !NativeRenderer_MidpointsFit());         /* GPU behind: off */
  assert(run(300,15000)==0 && !NativeRenderer_MidpointsFit());         /* still too long to come back */

@@ -423,6 +423,8 @@ void *LOAD_ReadFile_ex(struct BigHeader *bigfile, u32 loadType, int subfileIndex
 		readComplete = CdReadSync(0, NULL) == 0;
 		if (uVar5 != 0 && readComplete)
 		{
+			/* Before relocation: an older image's few raw entries are fixed here. */
+			Platform_FixLoadedFile(subfileIndex, ptrDst, eSize);
 			if (callback != NULL) LOAD_ReadFileASyncCallback(CdlComplete, NULL);
 			break;
 		}

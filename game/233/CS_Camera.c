@@ -86,6 +86,9 @@ void CS_Camera_ThTick_Boss(struct Thread *t)
 		// Wait for the recycler before loading the next model pack.
 		if (GAME_TRACKER->threadBuckets[OTHER].thread != NULL)
 			break;
+#if defined(CTR_NATIVE)
+		Platform_FreezeTrace("boss: load files %d %d %d", (int)bcd->fileIDs[0], (int)bcd->fileIDs[1], (int)bcd->fileIDs[2]);
+#endif
 		CS_LoadBoss(bcd);
 		CS_PHASE = CS_LOADING;
 		break;
@@ -113,6 +116,10 @@ void CS_Camera_ThTick_Boss(struct Thread *t)
 			}
 		}
 		MEMPACK_SwapPacks(GAME_TRACKER->activeMempackIndex);
+#if defined(CTR_NATIVE)
+		Platform_FreezeTrace("boss: loaded, head model %d, body model %d", CS_BOSS_MODELS[0] ? (int)CS_BOSS_MODELS[0]->id : -1,
+		                     CS_BOSS_MODELS[1] ? (int)CS_BOSS_MODELS[1]->id : -1);
+#endif
 		spawned = NULL;
 		initData.podiumPos.x = bcd->bossPos.x;
 		initData.podiumPos.y = bcd->bossPos.y;
@@ -161,6 +168,9 @@ void CS_Camera_ThTick_Boss(struct Thread *t)
 		gt->pushBuffer_UI.fadeFromBlack_desiredResult = CS_CAMERA_FADE_FULL;
 		gt->pushBuffer_UI.fade_step = CS_CAMERA_FADE_STEP;
 		CS_PHASE = CS_FADE_IN;
+#if defined(CTR_NATIVE)
+		Platform_FreezeTrace("boss: spawned, fading in");
+#endif
 		break;
 	}
 	case CS_FADE_IN:
@@ -289,8 +299,9 @@ void CS_Camera_ThTick_Podium(struct Thread *th)
 		}
 
 #if defined(CTR_NATIVE)
-		/* The console stopped after Start here (20261101-console*): trace on to the drive. */
-		Platform_FreezeTraceOpen("podium input", 1200, 240);
+		/* The console stopped after Start here (20261101-console*), in the boss
+		 * scene that follows: trace on to the drive. */
+		Platform_FreezeTraceOpen("podium input", 600, 20);
 		Platform_FreezeTrace("podium: %s, phase=%d drop=%d reward=%d mode2=%08x", (tapped & BTN_START) != 0 ? "Start" : (tapped & BTN_CROSS_one) != 0 ? "X" : "no button",
 		                     (int)CS_PHASE, (int)CS_PRIZE_DROP_READY, (int)GAME_TRACKER->podiumRewardID, (unsigned)modeFlags);
 #endif

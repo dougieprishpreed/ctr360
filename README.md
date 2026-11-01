@@ -118,7 +118,7 @@ Edit `ctr360.ini` beside `default.xex` to change graphics and controller binding
 ```ini
 [graphics]
 interpolation = 1
-steady = 1
+steady = 0
 texture_filter = 1
 edge_aa = 1
 widescreen = 1
@@ -127,7 +127,7 @@ widescreen = 1
 Missing or invalid settings keep their defaults.
 
 - `interpolation`: `1` renders intermediate poses for 60 FPS throughout single-player play, `2` only in races, and `0` renders at 30 FPS. Game logic and timers keep their original rate either way; 720p stays enabled.
-- `steady`: `1` drops the intermediate frames while the console can't draw them in time, so the game's 30 updates a second stay even (a steady 30 FPS in those scenes); `0` always draws them.
+- `steady`: `1` drops the intermediate frames while the console can't draw them in time, for a steady 30 FPS in those scenes; `0` always draws them.
 - `texture_filter`: `1` smooths world textures, `0` keeps them sharp.
 - `edge_aa`: `1` smooths polygon edges, `0` turns this off.
 - `widescreen`: `1` shows more of each course in 16:9, `0` keeps the original 4:3 view. On a widescreen TV, 4:3 is shown with black bars at the sides; on a 4:3 TV it fills the screen.

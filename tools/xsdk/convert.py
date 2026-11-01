@@ -36,7 +36,7 @@ DIALOG_TITLE = 'Choose your Crash Team Racing (USA) disc image'
 # SHA-256 of the converted image this release was tested with. Other good
 # dumps can differ in sectors the game never reads; they are accepted when
 # every conversion check passes.
-TESTED_CONVERSION = '8409cc0c50916ab01b6b76bf822934f9b024377efda088c004b0a90adb76ffdd'
+TESTED_CONVERSION = 'c4c8d6ecd00c7e8acfd1640cc4b64a3f7ff071fc89348982c07dca8794bfc70e'
 
 
 class Failure(Exception):

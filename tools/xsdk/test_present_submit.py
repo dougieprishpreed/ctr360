@@ -22,7 +22,7 @@ typedef struct {uint32_t drawn_back,clear_resolves,resolves_put_off,late_resolve
 static V4xEdramCounts v4x_edram_counts(void){V4xEdramCounts c={0};return c;}
 static int quadX,quadW,bars;
 static int xvCaptureRequested;static unsigned shots;
-static struct {unsigned submits,uploads,reads,draws,passes,shaderDraws[7],quads[4];unsigned submitMS,waitMS,frameWaitMS,acquireMS,presentMS;unsigned blendDraws[5],uiDraws,feedbackRequests,midpointFeedbackSkips,skippedSTPPasses;unsigned gpuFrames,gpuTotalUS,gpuMaxUS,gpuOver16;} xvCost;
+static struct {unsigned submits,uploads,reads,draws,passes,shaderDraws[7],quads[4];unsigned submitMS,waitMS,frameWaitMS,acquireMS,presentMS;unsigned blendDraws[5],uiDraws,feedbackRequests,midpointFeedbackSkips,skippedSTPPasses;unsigned gpuFrames,gpuTotalUS,gpuMaxUS,gpuOver16,earlyScenes;} xvCost;
 static int xvEdgeAA=1,xvSteadyOff;static unsigned xvGpuRecentUS,xvSteadySwitches;
 typedef struct {uint32_t vblanks,flips,missed;} XsdkPresentStats;
 static void xsdk_present_stats(XsdkPresentStats *s){*s=(XsdkPresentStats){0};}

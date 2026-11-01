@@ -751,6 +751,13 @@ void Platform_CatchUpVBlanks(void)
 {
 }
 
+void Platform_FixLoadedFile(int entry, void *bytes, int length)
+{
+	(void)entry;
+	(void)bytes;
+	(void)length;
+}
+
 void Platform_WaitUntilVBlank(int targetVBlank)
 {
 	int emittedVBlanks = 0;

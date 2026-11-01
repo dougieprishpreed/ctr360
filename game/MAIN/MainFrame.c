@@ -196,6 +196,7 @@ void MainFrame_ResetDB(struct GameTracker *gGT)
 static void MainFrame_TraceIntroStep(const char *step, int bucket)
 {
 #ifdef CTR_NATIVE
+	Platform_WatchStage(step);
 	static int lastFrame = -1;
 	static int frames = 0;
 	static int demoStart = -1;

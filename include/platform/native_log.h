@@ -12,6 +12,12 @@ void Platform_Log(const char *fmt, ...) CTR_PRINTF_FORMAT(1, 2);
 void Platform_LogWarn(const char *fmt, ...) CTR_PRINTF_FORMAT(1, 2);
 void Platform_LogError(const char *fmt, ...) CTR_PRINTF_FORMAT(1, 2);
 
+/* Where the main thread is, for the xSDK hang watchdog (no-ops elsewhere):
+ * a named stage, the thread tick being run, and one beat per frame. */
+void Platform_WatchStage(const char *stage);
+void Platform_WatchTick(const void *tick);
+void Platform_WatchBeat(void);
+
 /* ctr360 trace categories (IMPLEMENTATION_PLAN Phase 0.1).
  *
  * Diagnostic lines are classified by their leading [trace]/[probe] tag at the

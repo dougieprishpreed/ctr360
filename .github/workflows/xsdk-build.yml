@@ -58,6 +58,8 @@ jobs:
         run: |
           mkdir -p dist/licenses
           cp build-xsdk/output/default.xex dist/
+          # Names for the addresses the hang watchdog logs; the packages leave it out.
+          cp build-xsdk/output/ctr360.map dist/
           cp build-xsdk/output/licenses/* dist/licenses/
           cp LICENSE dist/LICENSE.txt
           cp THIRD_PARTY_NOTICES.md dist/THIRD_PARTY_NOTICES.txt

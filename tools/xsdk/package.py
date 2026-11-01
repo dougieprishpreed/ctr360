@@ -49,22 +49,27 @@ pause
 
 READ_ME = r'''CTR360 for Xbox 360
 
-You need an Xbox 360 that runs unsigned code (RGH or JTAG) and your own
-Crash Team Racing disc image: the USA release (SCUS-94426), dumped as
+You need an Xbox 360 that runs homebrew (such as with ABadAvatar) and your
+own Crash Team Racing disc image: the USA release (SCUS-94426), dumped as
 .cue/.bin with 2352-byte sectors.
 
-1. Double-click "Convert disc image.bat" and choose the .cue or .bin file,
-   or drop the file onto the .bat. Your image is only read; the converted
-   copy is written to apps\ctr360\assets\ctr-u.bin. Conversion takes a few
-   minutes and about 700 MB of free space.
-2. Copy the apps folder to the root of the console's hard drive, the drive
+1. Copy the apps folder to the root of the console's hard drive, the drive
    FTP shows as Hdd1. If an apps folder is already there, copy ctr360 into
    it instead. A folder on USB storage works too.
-3. Start apps\ctr360\default.xex from your dashboard.
+2. Copy your image's .bin, and its .cue, into apps\ctr360 beside
+   default.xex. Converting needs about 610 MB more free space there.
+3. Start apps\ctr360\default.xex from your dashboard. The first start
+   converts the .bin into assets\ctr-u.bin, which takes a few minutes,
+   then deletes the .bin and .cue and starts the game.
 
-If the Homebrew App Store installed CTR360, convert your image here and
-copy only apps\ctr360\assets\ctr-u.bin to hdd:\apps\ctr360\assets\ on the
-console.
+To convert on this PC instead, double-click "Convert disc image.bat"
+before step 1 and choose the .cue or .bin file, or drop the file onto the
+.bat. Your image is only read; the converted copy is written to
+apps\ctr360\assets\ctr-u.bin. Conversion takes a few minutes and about
+700 MB of free space.
+
+If the Homebrew App Store installed CTR360, copy your .bin to
+hdd:\apps\ctr360\ and start CTR360: it converts the same way.
 
 Updating: copy the new ctr360 folder over the old one. Your saves
 (memcards) and settings (ctr360.ini) are kept, and you only need to convert
@@ -81,9 +86,10 @@ converter\python\LICENSE.txt.
 
 GAME_README = r'''CTR360 for Xbox 360, built with the open xSDK and vulkan4xenon.
 
-It needs assets\ctr-u.bin beside default.xex: your own Crash Team Racing
-(USA, SCUS-94426) disc image, converted on a PC by the converter in the
-CTR360-Xbox360 release zip.
+It needs your own Crash Team Racing disc image (USA, SCUS-94426, a .bin
+with 2352-byte sectors). Copy the .bin beside default.xex: the first start
+converts it into assets\ctr-u.bin, then deletes the .bin and its .cue.
+The converter in the CTR360-Xbox360 release zip does the same on a PC.
 
 Back + Start exits. Settings are in ctr360.ini, which the game creates
 from ctr360.example.ini on its first start. Saves are kept in memcards\.

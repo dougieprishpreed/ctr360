@@ -568,10 +568,12 @@ static void ThTick_PushPending(struct Thread **pending, int *count, struct Threa
 internal struct Thread *ThTick_RunThreadNative(struct ThTickNativeContext *context, struct Thread *thread)
 {
 	context->currentThread = thread;
+	Platform_WatchTick((const void *)thread->funcThTick);
 	if (setjmp(context->env) == 0)
 	{
 		thread->funcThTick(thread);
 	}
+	Platform_WatchTick(NULL);
 
 	return context->currentThread;
 }

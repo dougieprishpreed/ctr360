@@ -431,6 +431,7 @@ u32 main(void)
 
 			// reset vsync calls between drawsync
 #ifdef _XBOX
+			Platform_WatchStage("render-intermediate");
             NativeHD_RenderIntermediate(gGT);
 #endif
 			gGT->vSync_between_drawSync = 0;
@@ -441,6 +442,9 @@ u32 main(void)
 #endif
 #if defined(CTR_NATIVE) && defined(CTR_INTERNAL)
 			NativePerf_BeginScope(NATIVE_PERF_BUCKET_RENDER_FRAME);
+#endif
+#ifdef CTR_NATIVE
+			Platform_WatchStage("render-frame");
 #endif
 			MainFrame_RenderFrame(gGT, gGS);
 #if defined(CTR_NATIVE) && defined(CTR_INTERNAL)
@@ -454,6 +458,9 @@ u32 main(void)
 			// if mask is talking in Adventure Hub
 			if (sdata->boolDraw3D_AdvMask != 0)
 			{
+#ifdef CTR_NATIVE
+				Platform_WatchStage("mask-hint");
+#endif
 				AH_MaskHint_Update();
 			}
 #if defined(CTR_NATIVE) && defined(CTR_INTERNAL)

@@ -160,6 +160,15 @@ Approach: **offline cooking of the user's disc image, in place.**
   actually interprets as LE).
 - Saves/memcards written by the 360 build are native-BE of our own making;
   cross-compat with PC builds is out of scope (can be added later).
+- On the console: the swaps sit at the same places in every good dump of
+  the USA disc, so `tools/xsdk/make_cook_recipe.py` records them once from
+  the cooker, as positions and sizes only (`platform/xsdk/cook_recipe.bin`,
+  1.4 MB, built into the XEX). A first start without `assets/ctr-u.bin`
+  copies the player's `.bin` through it (`platform/native_disc_cook.c`) and
+  keeps the copy only when its CRC-32 is that of the PC cooker's image
+  (SHA-256 8409cc0c...), then deletes the `.bin` and `.cue`.
+  `test_disc_cook.py` checks the replay on synthetic discs and, given the
+  dump, that the console code makes the PC cooker's image byte for byte.
 
 Verification:
 1. Python round-trip tests: swap-convert-back equals original; per-format

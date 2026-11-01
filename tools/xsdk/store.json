@@ -1,8 +1,8 @@
 {
   "title_id": "43545233",
   "title_name": "CTR360",
-  "version": "1.0.3.0",
-  "release_tag": "v1.0.3",
+  "version": "1.0.4.0",
+  "release_tag": "v1.0.4",
   "release_base": "https://github.com/dougieprishpreed/ctr360/releases/download",
   "entry": {
     "id": "ctr360",
@@ -10,8 +10,8 @@
     "author": "dougieprishpreed",
     "category": "ports",
     "sentence": "The PC port of a classic PlayStation kart racer, at 1280x720 and up to 60 fps.",
-    "needs": "assets\\ctr-u.bin from the PC converter",
-    "changes": "In the store, which Back + Start returns to; makes ctr360.ini on its first start.",
+    "needs": "Your CTR (USA) .bin beside it, once",
+    "changes": "Converts your disc image on the console on its first start, so no PC is needed.",
     "source": "https://github.com/dougieprishpreed/ctr360",
     "license": "GPL-3.0",
     "screenshot": "shots/ctr360.png",

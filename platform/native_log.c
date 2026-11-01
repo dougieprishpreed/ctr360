@@ -115,6 +115,20 @@ void Platform_LogFlush(void)
 	}
 }
 
+void Platform_WatchStage(const char *stage)
+{
+	(void)stage;
+}
+
+void Platform_WatchTick(const void *tick)
+{
+	(void)tick;
+}
+
+void Platform_WatchBeat(void)
+{
+}
+
 void Platform_Log(const char *fmt, ...)
 {
 	va_list args;

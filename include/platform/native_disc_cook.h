@@ -1,0 +1,37 @@
+#ifndef NATIVE_DISC_COOK_H
+#define NATIVE_DISC_COOK_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+/* The PC converter's work on the console: the player's own .bin, through the
+ * cook recipe tools/xsdk/make_cook_recipe.py records, into assets\ctr-u.bin. */
+
+enum NativeDiscCookResult
+{
+    NATIVE_DISC_COOK_OK = 0,
+    NATIVE_DISC_COOK_BAD_RECIPE,
+    NATIVE_DISC_COOK_WRONG_SIZE, /* not the size of the USA disc's image */
+    NATIVE_DISC_COOK_READ_FAILED,
+    NATIVE_DISC_COOK_WRITE_FAILED,
+    NATIVE_DISC_COOK_MISMATCH, /* converted, but not into the image the recipe makes */
+};
+
+struct NativeDiscCookRecipe
+{
+    const unsigned char *bytes, *end;
+    uint32_t imageBytes, crc, runs;
+};
+
+/* Called after each stretch of sectors is written. */
+typedef void (*NativeDiscCookProgress)(void *context, uint32_t sectorsDone, uint32_t sectors);
+
+int NativeDiscCook_OpenRecipe(struct NativeDiscCookRecipe *recipe, const void *bytes, size_t length);
+/* Writes destination from source, then checks it whole; removes it unless the result is OK. */
+int NativeDiscCook_Convert(const struct NativeDiscCookRecipe *recipe, const char *source, const char *destination,
+                           NativeDiscCookProgress progress, void *context);
+/* A file in folder (ending in a separator) named *.bin in any case, preferring one of imageBytes: folder + name
+ * in out, and its size. 0 if there is none. */
+int NativeDiscCook_FindImage(const char *folder, uint64_t imageBytes, char *out, size_t outBytes, uint64_t *bytes);
+
+#endif

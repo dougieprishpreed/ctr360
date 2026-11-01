@@ -24,9 +24,11 @@ python3 "$ROOT/tools/xsdk/test_frame_slots.py" --vulkan "$VULKAN4XENON" --out "$
 python3 "$ROOT/tools/xsdk/test_background_fill.py" --vulkan "$VULKAN4XENON" --out "$OUT/fill-tests"
 python3 "$ROOT/tools/xsdk/test_matrix_bake.py" --out "$OUT/matrix-tests"
 python3 "$ROOT/tools/xsdk/test_midpoint_spin.py" --out "$OUT/spin-tests"
+python3 "$ROOT/tools/xsdk/test_midpoint_effects.py" --out "$OUT/effect-tests"
 python3 "$ROOT/tools/xsdk/test_split_hud.py" --out "$OUT/split-hud-tests"
 python3 "$ROOT/tools/xsdk/test_pause_background.py" --out "$OUT/pause-tests"
 python3 "$ROOT/tools/xsdk/test_config_default.py" --out "$OUT/config-tests"
+python3 "$ROOT/tools/xsdk/test_disc_cook.py" --out "$OUT/disc-cook-tests"
 python3 "$ROOT/tools/xsdk/test_log_buffer.py" --out "$OUT/log-tests"
 python3 "$ROOT/tools/xsdk/test_xa_stride.py" --out "$OUT/xa-tests"
 python3 "$ROOT/tools/xsdk/prepare_sources.py" --root "$ROOT" --out "$ROOT/build-xsdk/gen"
@@ -51,6 +53,8 @@ FLAGS=(-mcpu=cell -fno-pic -std=gnu17 -O2 -g -fno-strict-aliasing -fwrapv -mchec
   -I"$GEN/platform/xbox360/sdl_shim" -I"$GEN/include" -I"$GEN")
 # SCREENSHOTS=1 makes a test build whose Back + LB + RB saves screenshots; releases leave it off.
 if [ "${SCREENSHOTS:-0}" = 1 ]; then FLAGS+=(-DCTR360_SCREENSHOTS=1); fi
+# The disc conversion's recipe, built into the XEX (platform/xsdk/native_xsdk_disc_cook.c).
+FLAGS+=(-DCTR360_COOK_RECIPE="\"$ROOT/platform/xsdk/cook_recipe.bin\"")
 "$CC" "${FLAGS[@]}" -c "$GEN/platform/xsdk/main_xsdk.c" -o ctr360.o
 "$CC" "${FLAGS[@]}" -c ctr_shaders.c -o ctr_shaders.o
 "$CC" -mcpu=cell -fno-pic -static -nostdlib -T "$XSDK/src/xsdk.ld" \

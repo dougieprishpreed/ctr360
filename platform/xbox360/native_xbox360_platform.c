@@ -266,6 +266,7 @@ void Platform_EndScene(void)
 
 	s_platformBeginScene = 0;
 
+	Platform_WatchStage("end-scene");
 	NativeRenderer_EndScene();
 	tEndScene = X360_GetCounter();
 
@@ -304,6 +305,7 @@ void Platform_EndScene(void)
 		NativeRenderer_EndGpuFrame();
 		tEndGpu = X360_GetCounter();
 		NativeRenderer_SwapWindow();
+		Platform_WatchBeat();
 		s_pinnedVramDisplayFrames--;
 		if (s_pinnedVramDisplayFrames <= 0)
 		{
@@ -321,12 +323,17 @@ void Platform_EndScene(void)
 	}
 
 	/* Keep the displayed VRAM region current for screen-copy effects. */
+	Platform_WatchStage("present");
 	NativeRenderer_StoreFrameBuffer(activeDispEnv.disp.x, activeDispEnv.disp.y, activeDispEnv.disp.w, activeDispEnv.disp.h);
 	NativeRenderer_PresentVRAMRect(activeDispEnv.disp.x, activeDispEnv.disp.y, activeDispEnv.disp.w, activeDispEnv.disp.h);
 	tPresent = X360_GetCounter();
+	Platform_WatchStage("end-gpu-frame");
 	NativeRenderer_EndGpuFrame();
 	tEndGpu = X360_GetCounter();
+	Platform_WatchStage("swap");
 	NativeRenderer_SwapWindow();
+	Platform_WatchStage("game");
+	Platform_WatchBeat();
 
 	if ((s_endSceneTimingTrace <= 4) || ((s_endSceneTimingTrace % 32) == 0))
 	{
@@ -561,9 +568,11 @@ internal void Native_WaitAndEmitVBlank(void)
 	u64 tEmitEnd;
 	static int s_vblankTimingTrace = 0;
 
+	Platform_WatchStage("vblank-wait");
 	Native_EnsureVBlankTarget();
 	Native_WaitUntilVBlankTarget();
 	tWaitEnd = X360_GetCounter();
+	Platform_WatchStage("vblank-emit");
 	Native_EmitVBlank();
 	tEmitEnd = X360_GetCounter();
 	Native_AdvanceVBlankTarget();

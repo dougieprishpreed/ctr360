@@ -68,6 +68,8 @@
 #include "platform/xsdk/native_xsdk_video.c"
 #include "platform/xbox360/native_xbox360_platform.c"
 #include "platform/xbox360/native_xbox360_input.c"
+#include "platform/native_disc_cook.c"
+#include "platform/xsdk/native_xsdk_disc_cook.c"
 
 #ifndef CTR_NATIVE_VERSION
 #define CTR_NATIVE_VERSION "0.0.0-dev"
@@ -99,6 +101,9 @@ int main(void)
 
 	Platform_Log("[CTR Native] Base: %s\n", NativeAssets_GetBaseDir());
 	Platform_Log("[CTR Native] Assets: %s\n", NativeAssets_GetAssetDir());
+
+	/* No converted image yet: the player's .bin beside default.xex becomes it now. */
+	NativeXsdk_PrepareDisc();
 
 	/* XDK has no process CWD. Asset validation checks the absolute paths. */
 	Platform_Log("[boot] asset-validation begin\n");

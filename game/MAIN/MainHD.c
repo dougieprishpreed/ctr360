@@ -16,6 +16,7 @@ struct NativeHDPose
 {
     struct Instance *instance;
     struct Model *model;
+    struct Thread *thread;
     MATRIX matrix;
     u32 flags;
 };
@@ -37,7 +38,14 @@ static void NativeHD_IndexPreviousPoses(void)
     }
 }
 
-static int NativeHD_FindPreviousPose(struct Instance *instance, struct Model *model)
+/* The same object as last update: the same instance and, while a thread owns
+ * it, the same thread. Threaded effects change model as they animate (the
+ * turbo flames cycle eight models, one per update); matching their model as
+ * well left them at the update's end on midpoints, half a frame ahead of the
+ * kart, so at speed the flames showed twice and too high. A pooled instance
+ * reused for a new object comes with a new thread; threadless level
+ * instances still need their model to match. */
+static int NativeHD_FindPreviousPose(struct Instance *instance, struct Model *model, struct Thread *thread)
 {
     int probes;
     u32 slot = (((u32)instance >> 4) * 2654435761u) & (NATIVE_HD_POSE_HASH_SIZE - 1);
@@ -45,7 +53,8 @@ static int NativeHD_FindPreviousPose(struct Instance *instance, struct Model *mo
     {
         int index = (int)s_hdPoseHash[slot] - 1;
         if (index < 0) return -1;
-        if (s_hdPrevious[index].instance == instance && s_hdPrevious[index].model == model) return index;
+        if (s_hdPrevious[index].instance == instance &&
+            (thread != NULL ? s_hdPrevious[index].thread == thread : s_hdPrevious[index].model == model)) return index;
         slot = (slot + 1) & (NATIVE_HD_POSE_HASH_SIZE - 1);
     }
     return -1;
@@ -257,6 +266,7 @@ void NativeHD_RenderIntermediate(struct GameTracker *gGT)
     {
         s_hdCurrent[count].instance = inst;
         s_hdCurrent[count].model = inst->model;
+        s_hdCurrent[count].thread = inst->thread;
         s_hdCurrent[count].matrix = inst->matrix;
         s_hdCurrent[count].flags = inst->flags;
         count++;
@@ -304,7 +314,7 @@ void NativeHD_RenderIntermediate(struct GameTracker *gGT)
                 s_hdCurrent[i].instance->flags |= HIDE_MODEL;
                 continue;
             }
-            j = NativeHD_FindPreviousPose(s_hdCurrent[i].instance, s_hdCurrent[i].model);
+            j = NativeHD_FindPreviousPose(s_hdCurrent[i].instance, s_hdCurrent[i].model, s_hdCurrent[i].thread);
             if (j >= 0)
             {
                     int axis, continuous = 1;

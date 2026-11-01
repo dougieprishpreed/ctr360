@@ -13,7 +13,7 @@ The earlier Microsoft XDK build is kept on the [`xdk`](https://github.com/dougie
 - An Xbox 360 capable of launching unsigned homebrew XEX files, with a compatible dashboard such as Aurora.
 - A writable USB drive or HDD for the game folder and saves.
 - Your own **NTSC-U (USA), SCUS-94426** Crash Team Racing disc dump: a raw `.bin` with 2352-byte sectors and its data track starting at byte zero. Other regions, compressed images, and extracted ISO files are not supported.
-- To convert the disc image: 64-bit Windows 10 or 11 with the downloadable package, or Python 3.11 or newer on any system.
+- Nothing else to convert the disc image: the game converts it on the console on its first start. To convert it on a PC instead: 64-bit Windows 10 or 11 with the downloadable package, or Python 3.11 or newer on any system.
 - To build the executable yourself: Linux, or a Linux distribution under WSL on Windows.
 
 The repository contains source code and conversion tools. It does not include the game disc, textures, music, or any SDK files.
@@ -22,15 +22,15 @@ The repository contains source code and conversion tools. It does not include th
 
 ### Download a build
 
-Download `CTR360-Xbox360-<version>.zip` from the repository's latest **Release**. On Windows:
+Download `CTR360-Xbox360-<version>.zip` from the repository's latest **Release** and unzip it, then:
 
-1. Unzip it and double-click `Convert disc image.bat`.
-2. Choose your disc image, the `.cue` or the `.bin`, or drop it onto the `.bat`. Your image is only read; the converted copy is written to `apps\ctr360\assets\ctr-u.bin`. Conversion takes a few minutes and about 700 MB of free space.
-3. Copy the `apps` folder to the root of the console's hard drive, the drive FTP shows as `Hdd1`; if an `apps` folder is already there, copy `ctr360` into it instead. A folder on USB storage works too. Then start `apps\ctr360\default.xex` from your dashboard.
+1. Copy the `apps` folder to the root of the console's hard drive, the drive FTP shows as `Hdd1`; if an `apps` folder is already there, copy `ctr360` into it instead. A folder on USB storage works too.
+2. Copy your disc image's `.bin`, and its `.cue`, into `apps\ctr360` beside `default.xex`. Converting needs about 610 MB more free space on that drive.
+3. Start `apps\ctr360\default.xex` from your dashboard. The first start converts the `.bin` into `assets\ctr-u.bin` behind a progress bar, which takes a few minutes, then deletes the `.bin` and `.cue` and starts the game. Later starts go straight to the game. A dump that isn't the USA disc is left as it is, and the screen says why.
 
-The converter needs no installation: it includes the official Python embeddable package.
+To convert on a PC instead, double-click `Convert disc image.bat` before step 1 and choose your `.cue` or `.bin`, or drop it onto the `.bat`. Your image is only read; the converted copy is written to `apps\ctr360\assets\ctr-u.bin`, the same file the console makes. The converter needs no installation: it includes the official Python embeddable package.
 
-Each release also carries `ctr360-<version>.zip`, the package the [Homebrew App Store](https://github.com/xenosworks/homebrew-app-store) installs into `hdd:\apps\ctr360\`. When the store installs CTR360, convert your image with the release zip as above and copy only `assets\ctr-u.bin` to `hdd:\apps\ctr360\assets\` on the console. Back + Start then returns to the store.
+Each release also carries `ctr360-<version>.zip`, the package the [Homebrew App Store](https://github.com/xenosworks/homebrew-app-store) installs into `hdd:\apps\ctr360\`. After the store installs CTR360, copy your `.bin` to `hdd:\apps\ctr360\` and start it from the store; it converts the same way. Back + Start then returns to the store.
 
 Every update to `main` is also built by GitHub Actions. Open the repository's **Actions** tab, choose the latest successful **xSDK build** run, and download its artifacts (downloads require a GitHub login): `ctr360-xex` contains only `default.xex`, its license notices, and an example configuration, for staging the folder yourself as described below; `ctr360-release` contains both release zips and the store's catalogue entry.
 

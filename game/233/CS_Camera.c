@@ -288,6 +288,12 @@ void CS_Camera_ThTick_Podium(struct Thread *th)
 			return;
 		}
 
+#if defined(CTR_NATIVE)
+		/* The console stopped after Start here (20261101-console*): trace on to the drive. */
+		Platform_FreezeTraceOpen("podium input", 1200, 240);
+		Platform_FreezeTrace("podium: %s, phase=%d drop=%d reward=%d mode2=%08x", (tapped & BTN_START) != 0 ? "Start" : (tapped & BTN_CROSS_one) != 0 ? "X" : "no button",
+		                     (int)CS_PHASE, (int)CS_PRIZE_DROP_READY, (int)GAME_TRACKER->podiumRewardID, (unsigned)modeFlags);
+#endif
 		gGT = GAME_TRACKER;
 		if ((gGT->gameMode1 & ADVENTURE_MODE) != 0)
 		{
@@ -320,6 +326,9 @@ void CS_Camera_ThTick_Podium(struct Thread *th)
 					th->flags |= THREAD_FLAG_DEAD;
 
 					CS_DestroyPodium_StartDriving();
+#if defined(CTR_NATIVE)
+					Platform_FreezeTrace("podium: destroyed, driving");
+#endif
 
 					// Use the resumed race's reward and driver for the spoken hint.
 					switch (GAME_TRACKER->podiumRewardID)
@@ -346,8 +355,14 @@ void CS_Camera_ThTick_Podium(struct Thread *th)
 						hintID += ADV_MASK_HINT_UKA_UKA_XA_OFFSET;
 					}
 
+#if defined(CTR_NATIVE)
+					Platform_FreezeTrace("podium: XA stop, then hint %d (XA state %d)", hintID, (int)sdata->XA_State);
+#endif
 					CDSYS_XAPauseForce();
 					CDSYS_XAPlay(1, hintID);
+#if defined(CTR_NATIVE)
+					Platform_FreezeTrace("podium: hint playing (XA state %d)", (int)sdata->XA_State);
+#endif
 
 					GAME_TRACKER->podiumRewardID = NOFUNC;
 					return;

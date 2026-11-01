@@ -3524,11 +3524,13 @@ int NativeAudio_GetXATrackLength(int categoryID, int xaID)
 
 void NativeAudio_StopXA(void)
 {
+	Platform_FreezeTrace("XA: stop");
 	NativeAudio_LockOutput();
 
 	NativeAudio_CloseXANoLock();
 
 	NativeAudio_UnlockOutput();
+	Platform_FreezeTrace("XA: stopped");
 }
 
 void NativeAudio_SetXAVolume(int volumeLeft, int volumeRight)
@@ -3564,11 +3566,14 @@ int NativeAudio_PlayXATrack(int categoryID, int xaID, int volumeLeft, int volume
 		return 0;
 	}
 
+	Platform_FreezeTrace("XA: prepare %d/%d", categoryID, xaID);
 	if (!NativeAudio_PrepareXATrack(categoryID, xaID, &prepared, 1))
 	{
+		Platform_FreezeTrace("XA: %d/%d couldn't be prepared", categoryID, xaID);
 		return 0;
 	}
 
+	Platform_FreezeTrace("XA: start %d/%d, %u frames", categoryID, xaID, (unsigned)prepared.frameCount);
 	NativeAudio_LockOutput();
 
 	NativeAudio_CloseXANoLock();
@@ -3590,6 +3595,7 @@ int NativeAudio_PlayXATrack(int categoryID, int xaID, int volumeLeft, int volume
 
 	NativeAudio_UnlockOutput();
 	NativeAudio_XaPreparedStreamClose(&prepared);
+	Platform_FreezeTrace("XA: started");
 
 	return 1;
 }

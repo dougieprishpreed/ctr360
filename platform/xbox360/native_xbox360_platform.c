@@ -17,8 +17,7 @@
 
 #include <xtl.h>
 #if defined(CTR_XSDK)
-#include <string.h>
-#include <xsdk/xam.h>
+#include <xsdk/present.h>
 #endif
 
 #include <macros.h>
@@ -145,28 +144,13 @@ void Platform_Init(const char *title, int width, int height)
 
 void Platform_Exit(int status)
 {
-#if defined(CTR_XSDK)
-	/* Started by the Homebrew App Store, whose launch data is its own path
-	 * ended by a 0: go back there instead of to the dashboard. */
-	char store[XSDK_LAUNCH_DATA_MAX_BYTES];
-	const size_t storeBytes = xsdk_launch_data(store, sizeof store);
-	const int toStore = storeBytes != 0 && memchr(store, '\0', storeBytes) != NULL;
-#else
-	const int toStore = 0;
-#endif
 	/* XDK CRT exit/return-to-CRT terminates with KeBugCheck, not a title
-	 * switch. Use the same explicit dashboard launch as the quit chord. */
-	Platform_Log("[CTR Native] returning to %s status=%d\n", toStore ? "the store" : "dashboard", status);
+	 * switch. Use the same explicit dashboard launch as the quit chord,
+	 * also when the Homebrew App Store started the game. */
+	Platform_Log("[CTR Native] returning to dashboard status=%d\n", status);
 	Platform_LogFlush();
 	Platform_Shutdown();
 	Platform_LogShutdown();
-#if defined(CTR_XSDK)
-	/* Returns only if the store can't be started; the dashboard then. */
-	if (toStore)
-	{
-		xsdk_launch(store, NULL, 0);
-	}
-#endif
 	XLaunchNewImage(NULL, NULL);
 	for (;;)
 	{
@@ -502,6 +486,125 @@ internal void Native_WaitUntilVBlankTarget(void)
 	}
 }
 
+#if defined(CTR_XSDK)
+/* The TV's own vblanks, which xsdk_present_stats counts in its vblank
+ * interrupt once vulkan4xenon has the display, are what frames show at. The
+ * game's VBlanks follow them there. A frame's GPU work starts at its VBlank
+ * (RenderVSYNC, then the present), so it now starts as the last frame flips,
+ * with the whole refresh ahead of it. QPC's 59.83 Hz drifted against the
+ * TV's 60 Hz, and the gap between the two came out of the GPU's time: frames
+ * that fitted a refresh showed a refresh late, a few times a second, which
+ * made the 30 updates a second uneven. QPC keeps the time before the display
+ * opens and should its count stop. */
+#define NATIVE_DISPLAY_SPIN_US  2000
+#define NATIVE_DISPLAY_STALL_MS 100
+
+global_variable int s_displayClock = 0;      /* the game's VBlanks follow the TV's */
+global_variable u32 s_displayVBlank = 0;     /* the TV's vblank the last game VBlank stood for */
+global_variable u32 s_displayProbe = 0;      /* the count seen while QPC kept the time */
+global_variable u64 s_displaySeenAt = 0;     /* when a vblank was seen coming, by looking closely */
+global_variable u32 s_displaySeenVBlank = 0;
+global_variable u64 s_displayAnchorAt = 0;   /* the first vblank seen so, for the refresh's length */
+global_variable u32 s_displayAnchorVBlank = 0;
+global_variable u64 s_displayPeriod = 0;     /* a refresh in counter ticks */
+
+internal u32 Native_DisplayVBlanks(void)
+{
+	XsdkPresentStats stats;
+
+	xsdk_present_stats(&stats);
+	return stats.vblanks;
+}
+
+internal int Native_DisplayClock(void)
+{
+	u32 shown;
+
+	if (s_displayClock)
+	{
+		return 1;
+	}
+
+	/* A count that moves: the display is open and its interrupt runs. */
+	shown = Native_DisplayVBlanks();
+	if ((shown == 0) || (s_displayProbe == 0) || (shown == s_displayProbe))
+	{
+		s_displayProbe = shown;
+		return 0;
+	}
+
+	s_displayClock = 1;
+	s_displayVBlank = shown;
+	s_displaySeenAt = 0;
+	s_displayAnchorAt = 0;
+	s_displayPeriod = X360_GetFrequency() / 60;
+	Platform_Log("[timing] VBlanks follow the display's from its vblank %u\n", (unsigned)shown);
+	return 1;
+}
+
+internal void Native_SeeDisplayVBlank(u64 at, u32 vblank)
+{
+	const u64 freq = X360_GetFrequency();
+
+	if (s_displayAnchorAt == 0)
+	{
+		s_displayAnchorAt = at;
+		s_displayAnchorVBlank = vblank;
+	}
+	else if (vblank - s_displayAnchorVBlank >= 60)
+	{
+		const u64 period = (at - s_displayAnchorAt) / (u64)(vblank - s_displayAnchorVBlank);
+
+		if ((period > freq / 62) && (period < freq / 58))
+		{
+			s_displayPeriod = period;
+		}
+	}
+	s_displaySeenAt = at;
+	s_displaySeenVBlank = vblank;
+}
+
+/* Waits for the TV's vblank after s_displayVBlank: sleeps until it's near,
+ * then looks for it closely. 0 when the count stopped. */
+internal int Native_WaitForDisplayVBlank(void)
+{
+	const u64 freq = X360_GetFrequency();
+	const u64 spinWindow = Native_CounterFromMicroseconds(freq, NATIVE_DISPLAY_SPIN_US);
+	const u64 stall = Native_CounterFromMicroseconds(freq, (u64)NATIVE_DISPLAY_STALL_MS * 1000);
+	const u64 start = X360_GetCounter();
+	int looking = 0;
+
+	while (1)
+	{
+		const u32 shown = Native_DisplayVBlanks();
+		const u64 now = X360_GetCounter();
+
+		if (shown != s_displayVBlank)
+		{
+			if (looking && (shown == s_displayVBlank + 1))
+			{
+				Native_SeeDisplayVBlank(now, shown);
+			}
+			return 1;
+		}
+		if (now - start > stall)
+		{
+			return 0;
+		}
+		if ((s_displaySeenAt != 0) &&
+		    (now + spinWindow < s_displaySeenAt + s_displayPeriod * (u64)(s_displayVBlank + 1 - s_displaySeenVBlank)))
+		{
+			looking = 0;
+			Sleep(NATIVE_VSYNC_SLEEP_MS);
+		}
+		else
+		{
+			looking = 1;
+		}
+	}
+}
+#endif
+
 internal void Native_EmitVBlank(void)
 {
 	NativeRCnt_EmitVBlank();
@@ -518,6 +621,26 @@ internal void Native_EmitVBlank(void)
 internal int Native_CatchUpDueVBlanks(void)
 {
 	int emittedVBlanks = 0;
+
+#if defined(CTR_XSDK)
+	if (Native_DisplayClock())
+	{
+		const u32 shown = Native_DisplayVBlanks();
+
+		if (shown - s_displayVBlank > NATIVE_VSYNC_CATCHUP_MAX)
+		{
+			s_displayVBlank = shown;
+			return 0;
+		}
+		while (s_displayVBlank != shown)
+		{
+			Native_EmitVBlank();
+			emittedVBlanks++;
+			s_displayVBlank++;
+		}
+		return emittedVBlanks;
+	}
+#endif
 
 	Native_EnsureVBlankTarget();
 
@@ -569,8 +692,27 @@ internal void Native_WaitAndEmitVBlank(void)
 	static int s_vblankTimingTrace = 0;
 
 	Platform_WatchStage("vblank-wait");
-	Native_EnsureVBlankTarget();
-	Native_WaitUntilVBlankTarget();
+#if defined(CTR_XSDK)
+	if (Native_DisplayClock())
+	{
+		if (Native_WaitForDisplayVBlank())
+		{
+			s_displayVBlank++;
+		}
+		else
+		{
+			Platform_Log("[timing] the display's vblanks stopped at %u; VBlanks follow QPC\n", (unsigned)s_displayVBlank);
+			s_displayClock = 0;
+			s_displayProbe = 0;
+			s_nextVBlankCounter = 0;
+		}
+	}
+	if (!s_displayClock)
+#endif
+	{
+		Native_EnsureVBlankTarget();
+		Native_WaitUntilVBlankTarget();
+	}
 	tWaitEnd = X360_GetCounter();
 	Platform_WatchStage("vblank-emit");
 	Native_EmitVBlank();
@@ -580,6 +722,15 @@ internal void Native_WaitAndEmitVBlank(void)
 	s_vblankTimingTrace++;
 	if ((s_vblankTimingTrace <= 4) || ((s_vblankTimingTrace % 64) == 0))
 	{
+#if defined(CTR_XSDK)
+		if (s_displayClock)
+		{
+			Platform_Log("[timing] vblank wait=%.1fms emit=%.1fms display=%u refresh=%.3fms\n",
+			             Native_CounterToMs(tWaitEnd - tWaitStart), Native_CounterToMs(tEmitEnd - tWaitEnd),
+			             (unsigned)s_displayVBlank, Native_CounterToMs(s_displayPeriod));
+			return;
+		}
+#endif
 		Platform_Log("[timing] vblank wait=%.1fms emit=%.1fms nextTargetIn=%.1fms\n",
 		             Native_CounterToMs(tWaitEnd - tWaitStart), Native_CounterToMs(tEmitEnd - tWaitEnd),
 		             Native_CounterToMs((s_nextVBlankCounter > tEmitEnd) ? (s_nextVBlankCounter - tEmitEnd) : 0));
@@ -628,6 +779,11 @@ int VSync(int mode)
 int Platform_GetVBlankCount(void)
 {
 	return s_nativeVBlankCount;
+}
+
+void Platform_CatchUpVBlanks(void)
+{
+	Native_CatchUpDueVBlanks();
 }
 
 void Platform_WaitUntilVBlank(int targetVBlank)

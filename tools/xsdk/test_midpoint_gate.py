@@ -23,7 +23,8 @@ typedef unsigned u32;
 struct Level {void *ptr_mesh_info;};
 struct GameTracker {int numPlyrCurrGame;unsigned gameMode1,renderFlags;};
 static struct {struct {int stage;} Loading;} state,*sdata=&state;
-static int g_nativeHDEnableInterpolation=1;
+static int g_nativeHDEnableInterpolation=1,midpointsFit=1;
+static int NativeRenderer_MidpointsFit(void){return midpointsFit;}
 static int skips(struct GameTracker *gGT,struct Level *level){
 MODES return CONDITION;}
 int main(void){
@@ -41,8 +42,9 @@ int main(void){
   g_nativeHDEnableInterpolation=1;}
  g_nativeHDEnableInterpolation=2;assert(!skips(&race,&level));g_nativeHDEnableInterpolation=0;assert(skips(&race,&level));g_nativeHDEnableInterpolation=1;
  struct GameTracker split=race;split.numPlyrCurrGame=2;assert(skips(&split,&level));
+ midpointsFit=0;assert(skips(&race,&level));midpointsFit=1;assert(!skips(&race,&level)); /* steady: GPU behind */
  sdata->Loading.stage=0;assert(skips(&race,&level));
- puts("PASS: actual midpoint gate keeps checkered-flag transitions on the original route; hub, menus, cutscenes and results with setting 1 only; pause, split-screen and loading unchanged");
+ puts("PASS: actual midpoint gate keeps checkered-flag transitions on the original route; hub, menus, cutscenes and results with setting 1 only; pause, split-screen and loading unchanged; none while the GPU is behind (steady)");
 }
 '''.replace('CONDITION',condition).replace('MODES',modes)
 def run(source,name):

@@ -10,6 +10,8 @@ void NativeGpu_BeginHUDCapture(void);
 void NativeGpu_ReplayHUD(void);
 void NativeGpu_SetHUDCapture(int enabled);
 int NativeGpu_HasHUDCapture(void);
+/* 0 while the GPU can't draw an update's two frames in time ([graphics] steady). */
+int NativeRenderer_MidpointsFit(void);
 
 #define NATIVE_HD_INSTANCE_LIMIT 512
 struct NativeHDPose
@@ -246,8 +248,10 @@ void NativeHD_RenderIntermediate(struct GameTracker *gGT)
      * unrelated scenes or interpolating a respawn across the course.
      * The checkered flag also stays there while it slides off over the race
      * intro: RaceFlag_GetOT advances its slide when drawn and the flag is not
-     * in the HUD replay, so a midpoint would show alternate frames without it. */
-    if (!g_nativeHDEnableInterpolation || sdata->Loading.stage != LOAD_IDLE || level == NULL || level->ptr_mesh_info == NULL ||
+     * in the HUD replay, so a midpoint would show alternate frames without it.
+     * While the GPU can't draw two frames an update in time ([graphics]
+     * steady), each update draws only its own, so the updates stay even. */
+    if (!g_nativeHDEnableInterpolation || !NativeRenderer_MidpointsFit() || sdata->Loading.stage != LOAD_IDLE || level == NULL || level->ptr_mesh_info == NULL ||
         gGT->numPlyrCurrGame != 1 || (gGT->gameMode1 & originalRouteModes) != 0 ||
         (gGT->renderFlags & (RENDER_FLAG_DRAW_LEVEL | RENDER_FLAG_RENDER_BUCKET | RENDER_FLAG_CHECKERED_FLAG)) != (RENDER_FLAG_DRAW_LEVEL | RENDER_FLAG_RENDER_BUCKET))
     {
@@ -281,6 +285,7 @@ void NativeHD_RenderIntermediate(struct GameTracker *gGT)
     }
     if (canInterpolate)
     {
+        Platform_WatchStage("midpoint-draw");
         NativeHD_IndexPreviousPoses();
         savedDB = *gGT->backBuffer;
         ot = gGT->otSwapchainDB[gGT->swapchainIndex];
@@ -371,6 +376,7 @@ void NativeHD_RenderIntermediate(struct GameTracker *gGT)
         }
         /* Consume only the first of the retail frame's two VBlanks. The
          * regular RenderVSYNC handles the remainder before the current pose. */
+        Platform_WatchStage("midpoint-present");
         Platform_WaitUntilVBlank(Platform_GetVBlankCount() + 1);
         DrawSync(0);
         Platform_EndFrame();

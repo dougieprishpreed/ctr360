@@ -102,8 +102,16 @@ int main(void)
 	Platform_Log("[CTR Native] Base: %s\n", NativeAssets_GetBaseDir());
 	Platform_Log("[CTR Native] Assets: %s\n", NativeAssets_GetAssetDir());
 
-	/* No converted image yet: the player's .bin beside default.xex becomes it now. */
-	NativeXsdk_PrepareDisc();
+	/* No converted image yet: the player's .bin beside default.xex becomes it
+	 * now, and the game starts again. Where it can't, this start looks for the
+	 * image again: the paths above were found without it. */
+	if (NativeXsdk_PrepareDisc() && !NativeAssets_Init(basePath))
+	{
+		Platform_LogError("[CTR Native] Failed to initialize asset paths.\n");
+		Platform_LogShutdown();
+		Platform_Exit(1);
+		return 1;
+	}
 
 	/* XDK has no process CWD. Asset validation checks the absolute paths. */
 	Platform_Log("[boot] asset-validation begin\n");

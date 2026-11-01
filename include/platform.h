@@ -26,6 +26,9 @@ void Platform_PinVRAMDisplayFrames(int frameCount);
 void Platform_PinVRAMDisplayRect(int x, int y, int w, int h, int frameCount);
 int Platform_GetVBlankCount(void);
 void Platform_WaitUntilVBlank(int targetVBlank);
+/* Emits the VBlanks already due without waiting for another (the console's
+ * clock; a no-op on the PC, whose replays count its VSync calls). */
+void Platform_CatchUpVBlanks(void);
 void Platform_PollHostEvents(void);
 int Platform_PollInput(void);
 

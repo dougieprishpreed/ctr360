@@ -747,6 +747,10 @@ int Platform_GetVBlankCount(void)
 	return s_nativeVBlankCount;
 }
 
+void Platform_CatchUpVBlanks(void)
+{
+}
+
 void Platform_WaitUntilVBlank(int targetVBlank)
 {
 	int emittedVBlanks = 0;

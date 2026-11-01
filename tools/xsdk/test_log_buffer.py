@@ -105,3 +105,58 @@ exe = (a.out / 'logger-test').resolve()
 subprocess.run(['cc', '-std=c17', '-pthread', '-I'+str(a.out), '-I'+str(root),
                 '-I'+str(root/'include'), str(source), '-o', str(exe)], check=True)
 subprocess.run([str(exe)], check=True)
+
+# The freeze trace: in a FREEZE_TRACE=1 build, each line of a window goes to
+# game:/freeze_trace.log with an fsync of its own; stages only in its close
+# frames; nothing outside a window; and no file at all in other builds.
+trace = c[:c.index('#include "platform/xsdk/native_xsdk_log.c"')] + r'''
+#include <unistd.h>
+static unsigned syncs,traceWrites;
+static ssize_t countedWrite(int fd,const void *b,size_t n){traceWrites++;return write(fd,b,n);}
+static int countedFsync(int fd){syncs++;return fsync(fd);}
+#define write countedWrite
+#define fsync countedFsync
+#include "platform/xsdk/native_xsdk_log.c"
+#undef write
+#undef fsync
+static char text[4096];
+static const char *after(const char *from,const char *line){const char *at=strstr(from,line);assert(at);return at+strlen(line);}
+int main(void){
+ Platform_LogInit("trace");
+ Platform_FreezeTrace("before");Platform_WatchStage("outside");Platform_WatchBeat();
+ Platform_FreezeTraceOpen("podium",3,1);
+ Platform_FreezeTrace("event %d",1);
+ Platform_WatchStage("render-frame");Platform_WatchBeat();
+ Platform_WatchStage("present");Platform_FreezeTrace("event %d",2);
+ Platform_WatchBeat();Platform_WatchBeat();
+ Platform_FreezeTrace("after");
+ Platform_FreezeTraceOpen("again",2,0);Platform_WatchBeat();
+ FILE *f=fopen("game:/freeze_trace.log","rb");
+#if CTR360_FREEZE_TRACE
+ assert(f);text[fread(text,1,sizeof(text)-1,f)]=0;fclose(f);
+ const char *at=text;
+ at=after(at,"open: podium, for 3 frames, stages for 1\n");at=after(at,"event 1\n");at=after(at,"stage render-frame\n");
+ at=after(at,"frame shown: level=29 mode1=00180000 mode2=00000400\n");at=after(at,"event 2\n");
+ at=after(at,"frame shown");at=after(at,"frame shown");at=after(at,"closed\n");
+ at=after(at,"open: again, for 2 frames, stages for 0\n");at=after(at,"frame shown");
+ assert(!strstr(text,"before") && !strstr(text,"outside") && !strstr(text,"stage present") && !strstr(text,"after\n"));
+ unsigned lines=0;for(const char *s=text;*s;s++)lines+=*s=='\n';
+ assert(lines==10 && traceWrites==lines && syncs==lines);
+ puts("PASS: actual freeze trace writes and syncs each line of its windows, stages in the close frames only, nothing outside them");
+#else
+ assert(!f && traceWrites==0);
+ puts("PASS: builds without FREEZE_TRACE=1 write no freeze trace");
+#endif
+ return 0;
+}
+'''
+work = a.out / 'trace-run'
+(work / 'game:').mkdir(parents=True, exist_ok=True)
+for name, flags in (('trace-on', ['-DCTR360_FREEZE_TRACE=1']), ('trace-off', [])):
+    (work / 'game:' / 'freeze_trace.log').unlink(missing_ok=True)
+    source = a.out / (name + '.c')
+    source.write_text(trace)
+    exe = (a.out / name).resolve()
+    subprocess.run(['cc', '-std=c17', '-pthread', *flags, '-I'+str(a.out), '-I'+str(root),
+                    '-I'+str(root/'include'), str(source), '-o', str(exe)], check=True)
+    subprocess.run([str(exe)], check=True, cwd=work)

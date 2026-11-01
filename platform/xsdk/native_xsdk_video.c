@@ -5,6 +5,7 @@
  */
 #include <vulkan/vulkan.h>
 #include <vulkan4xenon.h>
+#include <xsdk/present.h>
 #include <platform/native_renderer.h>
 #include <platform/native_log.h>
 #include <platform/native_config.h>
@@ -85,6 +86,26 @@ static struct {
     unsigned blendDraws[5],uiDraws,feedbackRequests,midpointFeedbackSkips,skippedSTPPasses;
     unsigned gpuFrames,gpuTotalUS,gpuMaxUS,gpuOver16;
 } xvCost;
+/* [graphics] steady = 1: a frame's GPU work starts at the refresh its last
+ * frame shows at, so a frame longer than a refresh shows a refresh late; with
+ * an in-between frame each such update takes a refresh more, and the game's
+ * 30 updates a second come unevenly. While the GPU's recent frames average
+ * more than XV_STEADY_OFF_US, each update draws only its own frame, two
+ * refreshes long, until they average under XV_STEADY_ON_US again; each way
+ * holds XV_STEADY_HOLD_MS at least. The average is over about 16 frames. */
+enum { XV_STEADY_OFF_US=15500, XV_STEADY_ON_US=14000, XV_STEADY_HOLD_MS=2000 };
+static int xvSteady=1,xvSteadyOff;
+static unsigned xvGpuRecentUS,xvSteadySince,xvSteadySwitches;
+int NativeRenderer_MidpointsFit(void) { return !xvSteadyOff; }
+static void XvSteadyFrame(unsigned us)
+{
+    xvGpuRecentUS=xvGpuRecentUS ? xvGpuRecentUS-(xvGpuRecentUS>>4)+(us>>4) : us;
+    const unsigned now=GetTickCount();
+    const int off=xvSteady && xvGpuRecentUS>(xvSteadyOff ? XV_STEADY_ON_US : XV_STEADY_OFF_US);
+    if(off==xvSteadyOff || now-xvSteadySince<XV_STEADY_HOLD_MS)return;
+    xvSteadyOff=off;xvSteadySince=now;xvSteadySwitches++;
+    Platform_Log("[steady] in-between frames %s: the GPU's frames average %.1f ms\n",off?"off":"on",xvGpuRecentUS/1000.0);
+}
 int g_dbg_wireframeMode=0,g_dbg_texturelessMode=0,g_cfg_bilinearFiltering=1;
 /* CPU palette summaries are valid only while no GPU write overlaps them.
  * Track 16-word blocks: framebuffer writes must not invalidate an unrelated
@@ -160,6 +181,7 @@ static void XvStampRead(unsigned slot)
        stamps[1]<stamps[0])return;
     unsigned us=(unsigned)((double)(stamps[1]-stamps[0])*xv.timestampPeriod/1000.0);
     xvCost.gpuFrames++;xvCost.gpuTotalUS+=us;if(us>xvCost.gpuMaxUS)xvCost.gpuMaxUS=us;xvCost.gpuOver16+=us>16667;
+    XvSteadyFrame(us);
 }
 static void XvBufferCreate(XvBuffer *buffer,size_t bytes,VkBufferUsageFlags usage)
 {
@@ -438,6 +460,7 @@ static void XvConfig(const char *section,const char *key,const char *value,void 
     if(!strcmp(key,"texture_filter"))g_cfg_bilinearFiltering=enabled;
     if(!strcmp(key,"edge_aa"))xvEdgeAA=enabled;
     if(!strcmp(key,"widescreen"))g_nativeHDWidescreen=enabled;
+    if(!strcmp(key,"steady"))xvSteady=enabled;
 }
 int NativeRenderer_InitialiseRender(char *name,int width,int height,int fullscreen)
 {
@@ -445,8 +468,8 @@ int NativeRenderer_InitialiseRender(char *name,int width,int height,int fullscre
     NativeConfig_Read("game:/ctr360.ini",XvConfig,NULL);
     VIDEO_MODE video={0};VdQueryVideoMode(&video);
     NativeHD_WidenSplitScreenHud();
-    Platform_Log("[graphics] interpolation=%d texture_filter=%d edge_aa=%d widescreen=%d output=%ux%u%s self_test=%d screenshot=%d\n",
-        g_nativeHDEnableInterpolation,g_cfg_bilinearFiltering,xvEdgeAA,g_nativeHDWidescreen,
+    Platform_Log("[graphics] interpolation=%d steady=%d texture_filter=%d edge_aa=%d widescreen=%d output=%ux%u%s self_test=%d screenshot=%d\n",
+        g_nativeHDEnableInterpolation,xvSteady,g_cfg_bilinearFiltering,xvEdgeAA,g_nativeHDWidescreen,
         (unsigned)video.display_width,(unsigned)video.display_height,video.is_widescreen?" widescreen":"",xvSelfTest,xvScreenshots);
     const char *instanceExtensions[]={VK_KHR_SURFACE_EXTENSION_NAME,VK_KHR_DISPLAY_EXTENSION_NAME};
     const char *deviceExtensions[]={VK_KHR_SWAPCHAIN_EXTENSION_NAME};
@@ -860,8 +883,14 @@ void NativeRenderer_PresentVRAMRect(int x,int y,int w,int h)
         Platform_Log("[vulkan-work] blend-draws=%u,%u,%u,%u,%u ui=%u feedback=%u midpoint-feedback-skips=%u stp-pass-skips=%u\n",
             xvCost.blendDraws[0],xvCost.blendDraws[1],xvCost.blendDraws[2],xvCost.blendDraws[3],xvCost.blendDraws[4],
             xvCost.uiDraws,xvCost.feedbackRequests,xvCost.midpointFeedbackSkips,xvCost.skippedSTPPasses);
-        if(xvCost.gpuFrames)Platform_Log("[vulkan-gpu] frames=%u avg=%.1fms max=%.1fms over16ms=%u\n",
-            xvCost.gpuFrames,xvCost.gpuTotalUS/1000.0/xvCost.gpuFrames,xvCost.gpuMaxUS/1000.0,xvCost.gpuOver16);
+        if(xvCost.gpuFrames)Platform_Log("[vulkan-gpu] frames=%u avg=%.1fms max=%.1fms over16ms=%u recent=%.1fms in-between=%s switches=%u\n",
+            xvCost.gpuFrames,xvCost.gpuTotalUS/1000.0/xvCost.gpuFrames,xvCost.gpuMaxUS/1000.0,xvCost.gpuOver16,
+            xvGpuRecentUS/1000.0,xvSteadyOff?"off":"on",xvSteadySwitches);
+        /* The TV's side: its refreshes, those that flipped to a new frame, and those that showed the last one again. */
+        static XsdkPresentStats lastShown;XsdkPresentStats shown;xsdk_present_stats(&shown);
+        Platform_Log("[vulkan-present] refreshes=%u new-frames=%u repeats=%u\n",shown.vblanks-lastShown.vblanks,
+            shown.flips-lastShown.flips,shown.missed-lastShown.missed);
+        lastShown=shown;
         /* Render-pass eDRAM work in the layer: targets drawn back for a pass, and resolves. */
         static V4xEdramCounts lastEdram;V4xEdramCounts edram=v4x_edram_counts();
         Platform_Log("[vulkan-edram] drawn-back=%u clear-resolves=%u resolves-put-off=%u late-resolves=%u\n",

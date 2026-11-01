@@ -1209,6 +1209,9 @@ void MainFreeze_IfPressStart(void)
 	}
 
 	gGT->gameMode1 = gameMode1 | PAUSE_1;
+#if defined(CTR_NATIVE)
+	Platform_FreezeTrace("pause menu opens");
+#endif
 
 	menu = MainFreeze_GetMenuPtr();
 	menu->rowSelected = 0;

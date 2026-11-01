@@ -19,6 +19,7 @@ void MainRaceTrack_RequestLoad(s16 levelID)
 	/* Hidden flags are used by cutscenes. A race request from a live hub
 	 * must restore visibility: drawing owns the cover-transition advance,
 	 * and MainMain cannot begin IO until that transition reaches zero. */
+	Platform_FreezeTrace("load of level %d requested", (int)levelID);
 	if (sdata->Loading.stage != LOAD_REQUESTED)
 		Platform_Log("[load] request from=%d to=%d flag=%d anim=%d canDraw=%d flags=%08x hint=%d\n",
 		             (int)sdata->gGT->levelID, (int)levelID, (int)sdata->RaceFlag_Position,

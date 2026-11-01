@@ -3,13 +3,16 @@
  * the XEX (platform/xsdk/cook_recipe.bin, from tools/xsdk/make_cook_recipe.py),
  * behind a screen of the SDK's text with a progress bar. The screen has the
  * GPU before the game's renderer takes it. Once the image is in place the
- * .bin and its .cue are deleted and the game starts. */
+ * .bin and its .cue are deleted and the game starts again, finding the image
+ * as any later start does. */
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <xsdk/gpu.h>
 #include <xsdk/present.h>
 #include <xsdk/text.h>
+#include <xsdk/xam.h>
 #include "platform/native_disc_cook.h"
 
 #ifndef CTR360_COOK_RECIPE
@@ -28,6 +31,8 @@ extern const unsigned char ctr360CookRecipe[], ctr360CookRecipeEnd[];
 #define COOK_FOLDER "game:/"
 #define COOK_IMAGE "game:/assets/ctr-u.bin"
 #define COOK_PART "game:/assets/ctr-u.bin.part"
+/* Launch data of the start after a conversion, which logs the rest of it. */
+#define COOK_NOTE "ctr360-disc: "
 #define COOK_FULL_BLOCK "\xe2\x96\x88"
 #define COOK_LIGHT_SHADE "\xe2\x96\x91"
 enum
@@ -134,7 +139,7 @@ static void CookScreen_Frame(const char *title, const char *body, int percent, c
     xsdk_present_end();
 }
 
-/* Shows the message until a button is pressed, then leaves for the store or the dashboard. */
+/* Shows the message until a button is pressed, then leaves for the dashboard. */
 static void CookScreen_Fail(const char *title, const char *body)
 {
     int released = 0;
@@ -177,29 +182,35 @@ static void CookScreen_Progress(void *context, uint32_t done, uint32_t sectors)
     CookScreen_Frame("Converting your disc image", progress->body, (int)((uint64_t)done * 100 / sectors), footer);
 }
 
-void NativeXsdk_PrepareDisc(void)
+/* 1 when it made the image and the game couldn't start again, so this start
+ * has to look for the image anew; 0 when nothing changed. */
+int NativeXsdk_PrepareDisc(void)
 {
     struct NativeDiscCookRecipe recipe;
     struct CookProgress progress;
     struct stat info;
-    char source[400], cue[400], body[512];
+    char source[400], cue[400], body[512], note[XSDK_LAUNCH_DATA_MAX_BYTES + 1], self[300];
     const char *name;
     uint64_t bytes = 0;
+    size_t noteBytes;
     int found, result;
 
-    if (stat(COOK_IMAGE, &info) == 0 || stat("game:/assets/BIGFILE.BIG", &info) == 0) return;
+    noteBytes = xsdk_launch_data(note, sizeof(note) - 1);
+    note[noteBytes] = '\0';
+    if (strncmp(note, COOK_NOTE, strlen(COOK_NOTE)) == 0) Platform_LogWarn("[disc] %s\n", note + strlen(COOK_NOTE));
+    if (stat(COOK_IMAGE, &info) == 0 || stat("game:/assets/BIGFILE.BIG", &info) == 0) return 0;
     Platform_WatchStage("disc-convert");
     if (!NativeDiscCook_OpenRecipe(&recipe, ctr360CookRecipe, (size_t)(ctr360CookRecipeEnd - ctr360CookRecipe)))
     {
         Platform_LogError("[disc] the cook recipe in this XEX is damaged\n");
-        return;
+        return 0;
     }
     found = NativeDiscCook_FindImage(COOK_FOLDER, recipe.imageBytes, source, sizeof(source), &bytes);
     name = source + strlen(COOK_FOLDER);
     if (!CookScreen_Open())
     {
         Platform_LogError("[disc] no screen for the disc conversion\n");
-        return;
+        return 0;
     }
     if (!found)
     {
@@ -264,5 +275,16 @@ void NativeXsdk_PrepareDisc(void)
     snprintf(cue, sizeof(cue), "%.*s.CUE", (int)(strlen(source) - 4), source);
     unlink(cue);
     Platform_LogWarn("[disc] %s converted into %s and deleted\n", source, COOK_IMAGE);
+    CookScreen_Frame("Converting your disc image", progress.body, 100, "Done. Starting the game.");
     CookScreen_Close();
+    /* A new start, as the player's own would be: the image is found from the
+     * outset, and the renderer takes the GPU without the screen before it. */
+    snprintf(note, sizeof(note), COOK_NOTE "the previous start converted %s in %lu ms", name,
+             (unsigned long)(GetTickCount() - progress.startMs));
+    name = ExLoadedImageName != NULL ? strrchr(ExLoadedImageName, '\\') : NULL;
+    snprintf(self, sizeof(self), "game:/%s", name != NULL ? name + 1 : "default.xex");
+    Platform_LogFlush();
+    xsdk_launch(self, note, strlen(note) + 1);
+    Platform_LogError("[disc] %s couldn't start again (errno %d); starting without that\n", self, errno);
+    return 1;
 }

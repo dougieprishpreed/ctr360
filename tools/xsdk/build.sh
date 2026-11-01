@@ -18,6 +18,8 @@ python3 "$ROOT/tools/xsdk/test_vram_sampler.py" --vulkan "$VULKAN4XENON" --out "
 python3 "$ROOT/tools/xsdk/test_boot_readback.py" --vulkan "$VULKAN4XENON" --out "$OUT/readback-tests"
 python3 "$ROOT/tools/xsdk/test_hud_glow.py" --out "$OUT/hud-tests"
 python3 "$ROOT/tools/xsdk/test_midpoint_gate.py" --out "$OUT/midpoint-tests"
+python3 "$ROOT/tools/xsdk/test_steady_frames.py" --out "$OUT/steady-tests"
+python3 "$ROOT/tools/xsdk/test_display_pacing.py" --out "$OUT/pacing-tests"
 python3 "$ROOT/tools/xsdk/test_draw_routing.py" --vulkan "$VULKAN4XENON" --out "$OUT/routing-tests"
 python3 "$ROOT/tools/xsdk/test_present_submit.py" --vulkan "$VULKAN4XENON" --out "$OUT/present-tests"
 python3 "$ROOT/tools/xsdk/test_frame_slots.py" --vulkan "$VULKAN4XENON" --out "$OUT/slot-tests"
@@ -53,6 +55,8 @@ FLAGS=(-mcpu=cell -fno-pic -std=gnu17 -O2 -g -fno-strict-aliasing -fwrapv -mchec
   -I"$GEN/platform/xbox360/sdl_shim" -I"$GEN/include" -I"$GEN")
 # SCREENSHOTS=1 makes a test build whose Back + LB + RB saves screenshots; releases leave it off.
 if [ "${SCREENSHOTS:-0}" = 1 ]; then FLAGS+=(-DCTR360_SCREENSHOTS=1); fi
+# FREEZE_TRACE=1 makes a test build that writes freeze_trace.log, synced line by line, around the podium.
+if [ "${FREEZE_TRACE:-0}" = 1 ]; then FLAGS+=(-DCTR360_FREEZE_TRACE=1); fi
 # The disc conversion's recipe, built into the XEX (platform/xsdk/native_xsdk_disc_cook.c).
 FLAGS+=(-DCTR360_COOK_RECIPE="\"$ROOT/platform/xsdk/cook_recipe.bin\"")
 "$CC" "${FLAGS[@]}" -c "$GEN/platform/xsdk/main_xsdk.c" -o ctr360.o

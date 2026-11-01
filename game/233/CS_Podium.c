@@ -328,6 +328,9 @@ void CS_Podium_Prize_ThTick3(struct Thread *th)
 		gGT = GAME_TRACKER;
 		gGT->overlayTransition = 2;
 		gGT->gameMode2 &= ~VEH_FREEZE_PODIUM;
+#if defined(CTR_NATIVE)
+		Platform_FreezeTrace("prize: at the HUD, podium over");
+#endif
 		OtherFX_Play(PODIUM_REWARD_UNLOCK_SFX, 1);
 		th->flags |= THREAD_FLAG_DEAD;
 	}
@@ -462,6 +465,9 @@ void CS_Podium_Prize_ThTick1(struct Thread *th)
 		OtherFX_Stop2(PODIUM_PRIZE_STOP_DINGOFIRE_FX);
 		OtherFX_Stop2(PODIUM_PRIZE_STOP_AKUMOUTH_FX);
 		OtherFX_Play(PODIUM_PRIZE_FLY_TO_HUD_SFX, 1);
+#if defined(CTR_NATIVE)
+		Platform_FreezeTrace("prize: to the HUD, model %d", (int)th->modelIndex);
+#endif
 
 		ThTick_SetAndExec(th, CS_Podium_Prize_ThTick2);
 	}
@@ -716,6 +722,10 @@ void CS_Podium_FullScene_Init(void)
 	}
 	gGT = GAME_TRACKER;
 	gGT->gameMode2 |= VEH_FREEZE_PODIUM;
+#if defined(CTR_NATIVE)
+	Platform_FreezeTraceOpen("podium", 3600, 0);
+	Platform_FreezeTrace("podium: begins, level=%d reward=%d", (int)gGT->levelID, (int)gGT->podiumRewardID);
+#endif
 
 	// position and rotation of podium scene
 	// Y coordinate (podiumPos.y) has added height

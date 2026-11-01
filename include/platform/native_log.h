@@ -18,6 +18,15 @@ void Platform_WatchStage(const char *stage);
 void Platform_WatchTick(const void *tick);
 void Platform_WatchBeat(void);
 
+/* A trace that outlasts a frozen console, xSDK only (no-ops elsewhere): for
+ * the next frames beats, each Platform_FreezeTrace line and each frame's end,
+ * and the stages of the first closeFrames of them, go to freeze_trace.log
+ * beside default.xex, synced to the drive line by line, so its last line is
+ * the last thing done before the console stopped. Opening it again while it
+ * runs extends it. */
+void Platform_FreezeTraceOpen(const char *why, unsigned frames, unsigned closeFrames);
+void Platform_FreezeTrace(const char *fmt, ...) CTR_PRINTF_FORMAT(1, 2);
+
 /* ctr360 trace categories (IMPLEMENTATION_PLAN Phase 0.1).
  *
  * Diagnostic lines are classified by their leading [trace]/[probe] tag at the

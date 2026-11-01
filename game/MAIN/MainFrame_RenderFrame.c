@@ -1328,6 +1328,11 @@ void RenderVSYNC(struct GameTracker *gGT)
 		// must be called in the loop,
 		// or else it wont properly sync
 		DrawSync(0);
+		// NOTE: Retail's VBlank interrupt has counted the VBlanks that came
+		// while the frame was drawn. Native emits them in VSync(), which then
+		// waits for one more, so count them first or a late frame flips a
+		// VBlank later still.
+		Platform_CatchUpVBlanks();
 #endif
 
 		if (ReadyToFlip(gGT))

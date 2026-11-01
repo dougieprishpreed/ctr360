@@ -129,6 +129,18 @@ void Platform_WatchBeat(void)
 {
 }
 
+void Platform_FreezeTraceOpen(const char *why, unsigned frames, unsigned closeFrames)
+{
+	(void)why;
+	(void)frames;
+	(void)closeFrames;
+}
+
+void Platform_FreezeTrace(const char *fmt, ...)
+{
+	(void)fmt;
+}
+
 void Platform_Log(const char *fmt, ...)
 {
 	va_list args;

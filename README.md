@@ -30,7 +30,7 @@ Download `CTR360-Xbox360-<version>.zip` from the repository's latest **Release**
 
 To convert on a PC instead, double-click `Convert disc image.bat` before step 1 and choose your `.cue` or `.bin`, or drop it onto the `.bat`. Your image is only read; the converted copy is written to `apps\ctr360\assets\ctr-u.bin`, the same file the console makes. The converter needs no installation: it includes the official Python embeddable package.
 
-Each release also carries `ctr360-<version>.zip`, the package the [Homebrew App Store](https://github.com/xenosworks/homebrew-app-store) installs into `hdd:\apps\ctr360\`. After the store installs CTR360, copy your `.bin` to `hdd:\apps\ctr360\` and start it from the store; it converts the same way. Back + Start then returns to the store.
+Each release also carries `ctr360-<version>.zip`, the package the [Homebrew App Store](https://github.com/xenosworks/homebrew-app-store) installs into `hdd:\apps\ctr360\`. After the store installs CTR360, copy your `.bin` to `hdd:\apps\ctr360\` and start it from the store; it converts the same way. Back + Start returns to the dashboard.
 
 Every update to `main` is also built by GitHub Actions. Open the repository's **Actions** tab, choose the latest successful **xSDK build** run, and download its artifacts (downloads require a GitHub login): `ctr360-xex` contains only `default.xex`, its license notices, and an example configuration, for staging the folder yourself as described below; `ctr360-release` contains both release zips and the store's catalogue entry.
 
@@ -118,6 +118,7 @@ Edit `ctr360.ini` beside `default.xex` to change graphics and controller binding
 ```ini
 [graphics]
 interpolation = 1
+steady = 1
 texture_filter = 1
 edge_aa = 1
 widescreen = 1
@@ -126,6 +127,7 @@ widescreen = 1
 Missing or invalid settings keep their defaults.
 
 - `interpolation`: `1` renders intermediate poses for 60 FPS throughout single-player play, `2` only in races, and `0` renders at 30 FPS. Game logic and timers keep their original rate either way; 720p stays enabled.
+- `steady`: `1` drops the intermediate frames while the console can't draw them in time, so the game's 30 updates a second stay even (a steady 30 FPS in those scenes); `0` always draws them.
 - `texture_filter`: `1` smooths world textures, `0` keeps them sharp.
 - `edge_aa`: `1` smooths polygon edges, `0` turns this off.
 - `widescreen`: `1` shows more of each course in 16:9, `0` keeps the original 4:3 view. On a widescreen TV, 4:3 is shown with black bars at the sides; on a 4:3 TV it fills the screen.

@@ -23,7 +23,9 @@ static V4xEdramCounts v4x_edram_counts(void){V4xEdramCounts c={0};return c;}
 static int quadX,quadW,bars;
 static int xvCaptureRequested;static unsigned shots;
 static struct {unsigned submits,uploads,reads,draws,passes,shaderDraws[7],quads[4];unsigned submitMS,waitMS,frameWaitMS,acquireMS,presentMS;unsigned blendDraws[5],uiDraws,feedbackRequests,midpointFeedbackSkips,skippedSTPPasses;unsigned gpuFrames,gpuTotalUS,gpuMaxUS,gpuOver16;} xvCost;
-static int xvEdgeAA=1;
+static int xvEdgeAA=1,xvSteadyOff;static unsigned xvGpuRecentUS,xvSteadySwitches;
+typedef struct {uint32_t vblanks,flips,missed;} XsdkPresentStats;
+static void xsdk_present_stats(XsdkPresentStats *s){*s=(XsdkPresentStats){0};}
 static unsigned phase,submits,quads,modeSeen;
 void vkCmdClearAttachments(VkCommandBuffer c,uint32_t n,const VkClearAttachment *at,uint32_t rn,const VkClearRect *r){
  assert(phase==4 && n==1 && at->clearValue.color.float32[0]==0 && rn==2);

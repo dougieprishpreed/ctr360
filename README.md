@@ -122,6 +122,7 @@ steady = 0
 texture_filter = 1
 edge_aa = 1
 widescreen = 1
+close_seams = 1
 ```
 
 Missing or invalid settings keep their defaults.
@@ -131,6 +132,7 @@ Missing or invalid settings keep their defaults.
 - `texture_filter`: `1` smooths world textures, `0` keeps them sharp.
 - `edge_aa`: `1` smooths polygon edges, `0` turns this off.
 - `widescreen`: `1` shows more of each course in 16:9, `0` keeps the original 4:3 view. On a widescreen TV, 4:3 is shown with black bars at the sides; on a 4:3 TV it fills the screen.
+- `close_seams`: `1` closes the hairline cracks between nearby pieces of the track, `0` keeps the original's track edges.
 
 Frame rate varies with the scene. To reduce graphics cost, try `edge_aa = 0`, then `texture_filter = 0`. Texture filtering improves sampling; it does not replace the original textures with higher-detail artwork. In widescreen, world geometry uses an expanded 16:9 projection; the original HUD and menu layout keep their authored proportions, and in three- and four-player races each player's HUD reaches the outer edges of their view.
 

@@ -1100,8 +1100,16 @@ void CAM_SetDesiredPosRot(struct CameraDC *cDC, const SVec3 *pos, const SVec3 *r
 	cDC->flags |= CAMERA_FLAG_TRANSITION_AWAY;
 }
 
+#ifdef _XBOX
+// MainHD.c: [graphics] smooth_camera notes which kart camera 0 follows.
+void NativeHD_NoteFollowCamera(const struct CameraDC *cDC, const struct Driver *d);
+#endif
+
 void CAM_FollowDriver_Normal(struct CameraDC *cDC, struct Driver *d, SVec3 *pushBufferPos, struct CameraScratchWork *scratchWork, struct ZoomData *zoom)
 {
+#ifdef _XBOX
+	NativeHD_NoteFollowCamera(cDC, d);
+#endif
 	struct PushBuffer *pb = (struct PushBuffer *)pushBufferPos;
 	struct ScratchpadStruct *sps = (struct ScratchpadStruct *)scratchWork;
 	struct CameraScratch *cam = &scratchWork->camera;

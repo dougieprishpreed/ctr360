@@ -50,6 +50,16 @@ void DecalMP_01(struct GameTracker *gGT)
 			}
 
 			struct Instance *inst = driver->instSelf;
+#ifdef _XBOX
+			// Retail draws each small, distant kart once into spare VRAM and
+			// pastes that picture into the view, saving PS1 fill rate. On the
+			// 360 those pictures showed as garbled blocks, so every kart is
+			// drawn as its model in each view, keeping PIXEL_LOD's distance
+			// scale. No DecalMP entry is made, so DecalMP_02/03 do nothing.
+			inst->flags = (inst->flags | PIXEL_LOD) & ~PUSHBUFFER_EXISTS;
+			DecalMP_GetIdpp(inst, cameraID)->pushBuffer = pb;
+			continue;
+#endif
 			inst->flags |= PUSHBUFFER_EXISTS | PIXEL_LOD;
 
 			if (driverID == cameraID)

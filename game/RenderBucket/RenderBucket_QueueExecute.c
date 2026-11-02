@@ -5532,6 +5532,12 @@ static void ctr360_RbExecuteReport(void)
 	s_rbDrop[7] = 0;
 }
 
+#ifdef _XBOX
+// MainHD.c: course instances (queued first) draw with the camera's sub-unit shift.
+extern void *g_nativeHDCourseEntriesEnd;
+void NativeHD_CourseShift(int on);
+#endif
+
 void RenderBucket_Execute(void *param_1, struct PrimMem *param_2)
 {
 	struct RenderBucketEntry *entry = (struct RenderBucketEntry *)param_1;
@@ -5545,6 +5551,9 @@ void RenderBucket_Execute(void *param_1, struct PrimMem *param_2)
 	for (; entry->inst != 0; entry++)
 	{
 		struct RenderBucketDrawContext ctx = {0};
+#ifdef _XBOX
+		NativeHD_CourseShift((void *)entry < g_nativeHDCourseEntriesEnd);
+#endif
 		RenderBucket_TraceLateIntro("prepare-enter", entry->inst);
 
 		s_rbEnts++;
@@ -5562,6 +5571,9 @@ void RenderBucket_Execute(void *param_1, struct PrimMem *param_2)
 		RenderBucket_TraceLateIntro("draw-exit", entry->inst);
 		RenderBucket_ProbeSwapchain("execute-draw");
 	}
+#ifdef _XBOX
+	NativeHD_CourseShift(0);
+#endif
 
 	ctr360_RbExecuteReport();
 }

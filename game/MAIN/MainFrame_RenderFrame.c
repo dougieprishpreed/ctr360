@@ -13,6 +13,13 @@
 volatile int gCtrDebugSkipLevelGeometry = 0;
 #endif
 
+#ifdef _XBOX
+// MainHD.c: [graphics] smooth_camera's sub-unit shift for course draws.
+extern void *g_nativeHDCourseEntriesEnd;
+void NativeHD_PrepareCourseShift(struct GameTracker *gGT);
+void NativeHD_CourseShift(int on);
+#endif
+
 static void MainFrame_TraceLateRender(const char *step)
 {
 #ifdef CTR_NATIVE
@@ -137,6 +144,11 @@ void MainFrame_RenderFrame(struct GameTracker *gGT, struct GamepadSystem *gGamep
 	MAINFRAME_PERF_BEGIN(NATIVE_PERF_BUCKET_MAINFRAME_QUEUE_INSTANCES);
 	RenderBucket_QueueAllInstances(gGT);
 	MAINFRAME_PERF_END(NATIVE_PERF_BUCKET_MAINFRAME_QUEUE_INSTANCES);
+#ifdef _XBOX
+	// This update's view is final (RainLogic): the course shift for skids,
+	// course instances and geometry.
+	NativeHD_PrepareCourseShift(gGT);
+#endif
 
 	MAINFRAME_PERF_BEGIN(NATIVE_PERF_BUCKET_MAINFRAME_EFFECTS);
 	RenderAllNormalParticles(gGT);
@@ -179,7 +191,13 @@ void MainFrame_RenderFrame(struct GameTracker *gGT, struct GamepadSystem *gGamep
 		{
 			MAINFRAME_PERF_BEGIN(NATIVE_PERF_BUCKET_MAINFRAME_LEVEL_GEOMETRY);
 			MainFrame_TraceLateRender("geometry-enter");
+#ifdef _XBOX
+			NativeHD_CourseShift(1);
+#endif
 			RenderAllLevelGeometry(gGT, lev, ptr_mesh_info);
+#ifdef _XBOX
+			NativeHD_CourseShift(0);
+#endif
 			MainFrame_TraceLateRender("geometry-exit");
 			MAINFRAME_PERF_END(NATIVE_PERF_BUCKET_MAINFRAME_LEVEL_GEOMETRY);
 		}
@@ -765,6 +783,9 @@ void RenderBucket_QueueAllInstances(struct GameTracker *gGT)
 
 	RBI = RenderBucket_QueueLevInstances(&gGT->cameraDC[0], &gGT->backBuffer->otMem, gGT->ptrRenderBucketInstance, (u8)sdata->LOD[lod], numPlyrCurrGame,
 	                                     gGT->gameMode1 & PAUSE_ALL);
+#ifdef _XBOX
+	g_nativeHDCourseEntriesEnd = RBI;
+#endif
 
 	RBI = RenderBucket_QueueNonLevInstances(gGT->JitPools.instance.taken.first, &gGT->backBuffer->otMem, (void *)RBI, (u8)sdata->LOD[lod], numPlyrCurrGame,
 	                                        gGT->gameMode1 & PAUSE_ALL);
@@ -866,8 +887,15 @@ void RenderAllFlag0x40(struct GameTracker *gGT)
 	for (i = 0; i < gGT->numPlyrCurrGame; i++)
 	{
 		pb = &gGT->pushBuffer[i];
+#ifdef _XBOX
+		// Skid marks lie on the course and move with it.
+		NativeHD_CourseShift(1);
+#endif
 		VehGroundSkids_Main(gGT->threadBuckets[PLAYER].thread, pb);
 		VehGroundSkids_Main(gGT->threadBuckets[ROBOT].thread, pb);
+#ifdef _XBOX
+		NativeHD_CourseShift(0);
+#endif
 	}
 }
 

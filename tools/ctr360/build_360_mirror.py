@@ -287,11 +287,6 @@ SITE_PATCHES = [
      r"__typeof__\(&AH_WARP_CUPS\[0\]\) cups = AH_WARP_CUPS;",
      "struct AdventureCup *cups = AH_WARP_CUPS;",
      "__typeof__ (GNU extension) -> concrete element pointer type"),
-    ("game/230/MM_Characters.c",
-     r"struct Instance instance;\r?\n\t\tstruct InstDrawPerPlayer idpp\[4\];",
-     "u8 instanceBytes[sizeof(struct Instance)];\r\n\t\tstruct InstDrawPerPlayer idpp[4];",
-     "C2229: MSVC rejects a struct with a trailing zero-sized array as a "
-     "non-last member; the member is cast-only (idpp[N] accesses)"),
 ]
 
 HELPER_INSERT = (

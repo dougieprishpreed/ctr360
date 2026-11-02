@@ -179,6 +179,14 @@ internal int NativeRenderer_InitialiseGLContext(char *windowName, int fullscreen
 		windowFlags |= SDL_WINDOW_FULLSCREEN;
 	}
 
+#if defined(CTR_INTERNAL)
+	// Test aid, CTR_TEST_HIDDEN=1: the scene still renders to its own target.
+	if (SDL_getenv("CTR_TEST_HIDDEN") != NULL)
+	{
+		windowFlags |= SDL_WINDOW_HIDDEN;
+	}
+#endif
+
 	g_window = SDL_CreateWindow(windowName, g_windowWidth, g_windowHeight, windowFlags);
 
 	if (g_window == NULL)

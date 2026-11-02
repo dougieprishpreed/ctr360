@@ -356,6 +356,19 @@ internal void NativeInput_WriteInstalledSnapshots(void)
 	NativeInput_WritePadBus();
 }
 
+/* Test aid, [debug] shared_pad = 2..4: pad 1 also plays players 2..N whose
+ * controllers are absent, so split-screen modes can be reached and raced
+ * with one controller. 1 (the default) leaves every pad its own. */
+static int s_sharedPadPlayers = 1;
+
+static void NativeInput_SharePad(void)
+{
+	int slot;
+	for (slot = 1; slot < s_sharedPadPlayers && slot < NATIVE_INPUT_MAX_CONTROLLERS; slot++)
+		if (s_controllers[slot].connected == 0)
+			s_controllers[slot].snapshot = s_controllers[0].snapshot;
+}
+
 static void NativeInput_ApplyScript(void)
 {
 	static u16 previousPressed;
@@ -416,6 +429,11 @@ static void NativeInput_ConfigSetting(const char *section, const char *key, cons
     size_t i, j;
     int inverse = *value == '-';
     (void)context;
+    if (strcmp(section, "debug") == 0 && strcmp(key, "shared_pad") == 0)
+    {
+        if (value[0] >= '1' && value[0] <= '4' && value[1] == '\0') s_sharedPadPlayers = value[0] - '0';
+        return;
+    }
     if (strcmp(section, "controls") != 0) return;
     if (inverse) value++;
     for (i = 0; i < sizeof(destinations) / sizeof(destinations[0]); i++)
@@ -877,6 +895,7 @@ void Platform_InputUpdate(void)
 			s_controllers[slot].rumbleStopTick = 0;
 		}
 	}
+	NativeInput_SharePad();
 	NativeInput_ApplyScript();
 	NativeInput_WritePadBus();
 }

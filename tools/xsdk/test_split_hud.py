@@ -4,7 +4,8 @@ Each 3/4-player viewport is a 16:9 quarter of the 1280x720 screen, while the HUD
 squeeze keeps the authored 512-wide layout at 4:3 around the screen's centre:
 x -> 640 + (x - 256) * 1.875. That pulled every player's outer elements in over the
 kart: the place number sat over the middle of its viewport. Widescreen moves the
-outer-half elements out by the squeeze's margin; 4:3 keeps the tables as authored.
+outer-half elements out to the title-safe edge (90% of the screen, where TV overscan
+cannot hide them); 4:3 keeps the tables as authored.
 """
 import argparse,re,subprocess
 from pathlib import Path
@@ -60,19 +61,23 @@ int main(void){
    assert(table(p)[s].y==authored[p][s].y && table(p)[s].scale==authored[p][s].scale);
    double before=Out(was),after=Out(now);
    if(now!=was){moved++;
-    /* Outer elements keep their 4:3 distance from the screen edge (within a pixel)... */
+    /* Outer elements move to 30 squeeze units (56 pixels) inside their 4:3 distance from
+     * the screen edge, within a pixel, and stay in the title-safe 90%: 64 pixels in. The
+     * battle-weapon shine is a glow larger than its weapon, centred on it. */
     double edge=(p&1)?1280-after:after,authoredEdge=(p&1)?(512-was)*1.875:was*1.875;
-    assert(edge>authoredEdge-1.2 && edge<authoredEdge+1.2);
+    assert(edge>authoredEdge+56.25-1.2 && edge<authoredEdge+56.25+1.2);
+    assert(edge>=64 || s==UI_HUD_SLOT_BATTLE_WEAPON_BG);
     assert((p&1)?after>before:after<before);
    }
    /* ...and every anchor stays on its own player's side of the screen. */
    assert(after>=Left(p)-20 && after<=Right(p)+20);
   }
   /* The place number and its suffix sit at the outer side of the viewport, clear of the
-   * kart in its middle (squeezed, they started at 37% and 52% of their viewports). */
+   * kart in its middle (squeezed, they started at 37% and 52% of their viewports; title-safe,
+   * they are at 12% and 20%, or 68% and 77%). */
   for(int k=0;k<2;k++){
    int s=k?UI_HUD_SLOT_RANK:UI_HUD_SLOT_BIG1;double at=(Out(Abs(p,s,table(p)[s].x))-Left(p))/width;
-   assert((p&1)?at>0.7:at<0.2);
+   assert((p&1)?at>0.65:at<0.25);
   }
   /* Groups keep their spacing: number and suffix; weapon and its shine; fruit, count and shine. */
   int groups[3][3]={{UI_HUD_SLOT_BIG1,UI_HUD_SLOT_RANK,UI_HUD_SLOT_RANK},{UI_HUD_SLOT_WEAPON,UI_HUD_SLOT_BATTLE_WEAPON_BG,UI_HUD_SLOT_WEAPON},
@@ -90,7 +95,7 @@ int main(void){
  }
  struct PushBuffer full={{0,0,0x200,0x6a}};tracker.numPlyrCurrGame=2;assert(NativeHD_ViewportMidX(&full)==256);
  g_nativeHDWidescreen=0;tracker.numPlyrCurrGame=4;{struct PushBuffer pb={quarters[1]};assert(NativeHD_ViewportMidX(&pb)==0x103+0xfd/2);}
- printf("PASS: %u outer 3/4-player HUD anchors moved to their screen edges; place numbers at each viewport's outer side; groups kept; centred text on each viewport; 4:3 as authored\n",moved);
+ printf("PASS: %u outer 3/4-player HUD anchors moved out to the title-safe edge; place numbers at each viewport's outer side; groups kept; centred text on each viewport; 4:3 as authored\n",moved);
 }
 '''.replace('SLOTS',slots).replace('TABLES',tables).replace('CODE',code)
 def run(text,name):

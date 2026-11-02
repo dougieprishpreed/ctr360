@@ -766,6 +766,14 @@ void Platform_InputShutdown(void)
 	s_keyboardState = NULL;
 }
 
+extern int g_nativeTestFrame;
+static struct
+{
+	unsigned first, last;
+	u16 mask;
+} s_testScript[256];
+static s32 s_testScriptCount = -1;
+
 void Platform_InputUpdate(void)
 {
 	if (s_inputInitialized == 0)
@@ -794,6 +802,54 @@ void Platform_InputUpdate(void)
 		NativeInput_ResetSnapshot(slot);
 		NativeInput_ApplyController(slot);
 		NativeInput_ApplyKeyboard(slot, keyboardButtons);
+	}
+
+	// Test aid, CTR_PAD_SCRIPT: a text file of "first last mask" rows; pad 1
+	// holds the PSX buttons in hex mask from frame first to last, so a
+	// hidden window can be driven without focus. Frames are rendered frames,
+	// counted by Platform_EndScene (CTR_TEST_SHOT_EVERY uses them too).
+	if (s_testScriptCount < 0)
+	{
+		s_testScriptCount = 0;
+		const char *scriptPath = SDL_getenv("CTR_PAD_SCRIPT");
+		FILE *script = (scriptPath != NULL) ? fopen(scriptPath, "r") : NULL;
+		if (script != NULL)
+		{
+			unsigned first, last, mask;
+			while ((s_testScriptCount < (s32)len(s_testScript)) && (fscanf(script, "%u %u %x", &first, &last, &mask) == 3))
+			{
+				s_testScript[s_testScriptCount].first = first;
+				s_testScript[s_testScriptCount].last = last;
+				s_testScript[s_testScriptCount].mask = (u16)mask;
+				s_testScriptCount++;
+			}
+			fclose(script);
+			SDL_Log("[test] pad script %s: %d rows\n", scriptPath, (int)s_testScriptCount);
+		}
+	}
+	if (s_testScriptCount > 0)
+	{
+		u16 pressed = 0;
+		for (s32 row = 0; row < s_testScriptCount; row++)
+		{
+			if ((g_nativeTestFrame >= s_testScript[row].first) && (g_nativeTestFrame <= s_testScript[row].last))
+			{
+				pressed |= s_testScript[row].mask;
+			}
+		}
+		NativeInput_SetSnapshotButtons(&s_controllers[0].snapshot, (u16)~pressed);
+	}
+
+	// Test aid, CTR_SHARED_PAD=2..4 (the 360's [debug] shared_pad): pad 1
+	// also plays players 2..N that have no controller of their own.
+	const char *sharedPad = SDL_getenv("CTR_SHARED_PAD");
+	s32 sharedPlayers = ((sharedPad != NULL) && (sharedPad[0] >= '2') && (sharedPad[0] <= '4')) ? sharedPad[0] - '0' : 1;
+	for (s32 slot = 1; slot < sharedPlayers; slot++)
+	{
+		if (s_controllers[slot].controller == NULL)
+		{
+			s_controllers[slot].snapshot = s_controllers[0].snapshot;
+		}
 	}
 	NativeInput_WritePadBus();
 }

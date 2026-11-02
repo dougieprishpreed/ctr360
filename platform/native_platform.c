@@ -342,6 +342,10 @@ int Platform_BeginScene(void)
 	return 1;
 }
 
+#if defined(CTR_INTERNAL)
+int g_nativeTestFrame;
+#endif
+
 void Platform_EndScene(void)
 {
 	if (!s_platformBeginScene)
@@ -378,6 +382,24 @@ void Platform_EndScene(void)
 	// NOTE(aalhendi): Keep the displayed VRAM region current for screen-copy
 	// effects without forcing a CPU readback.
 	NativeRenderer_StoreFrameBuffer(activeDispEnv.disp.x, activeDispEnv.disp.y, activeDispEnv.disp.w, activeDispEnv.disp.h);
+#if defined(CTR_INTERNAL)
+	// Test aid, CTR_TEST_SHOT_EVERY=N: every N rendered frames, save all VRAM
+	// as shot_<frame>.tga (the displayed area is logged), hidden window or not.
+	g_nativeTestFrame++;
+	{
+		static int lastShot = -1;
+		const char *every = SDL_getenv("CTR_TEST_SHOT_EVERY");
+		int period = (every != NULL) ? SDL_atoi(every) : 0;
+		if ((period > 0) && (g_nativeTestFrame % period == 0) && (g_nativeTestFrame != lastShot))
+		{
+			char name[64];
+			lastShot = g_nativeTestFrame;
+			SDL_snprintf(name, sizeof(name), "shot_%06d.tga", g_nativeTestFrame);
+			NativeRenderer_SaveVRAM(name, 0, 0, VRAM_WIDTH, VRAM_HEIGHT, 1);
+			Platform_Log("[test] %s disp=%d,%d,%d,%d\n", name, activeDispEnv.disp.x, activeDispEnv.disp.y, activeDispEnv.disp.w, activeDispEnv.disp.h);
+		}
+	}
+#endif
 	NativeRenderer_PresentVRAMRect(activeDispEnv.disp.x, activeDispEnv.disp.y, activeDispEnv.disp.w, activeDispEnv.disp.h);
 	NativeRenderer_EndGpuFrame();
 	NativeRenderer_SwapWindow();

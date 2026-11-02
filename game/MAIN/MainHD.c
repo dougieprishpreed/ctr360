@@ -111,6 +111,141 @@ int g_nativeHDEnableInterpolation = 1;
  * HUD in a centred 4:3 area; 0 keeps the original 4:3 view. Boot-time only. */
 int g_nativeHDWidescreen = 1;
 
+/* [graphics] smooth_camera: the follow camera and the karts stand on whole
+ * units, so at low speed the course passed in uneven steps (5, 4, 6 units an
+ * update) and the ground juddered; at speed the same unit is lost in the
+ * motion. With 1, the course (level geometry and course instances, queued
+ * before the others) is drawn shifted by the camera's sub-unit place, as if
+ * it rode its exact path: while it follows the kart, the kart's own sub-unit
+ * position; for every other view (the race flyby, end-of-race shots), what a
+ * steady-motion filter of its whole-unit positions finds. Karts and what
+ * they carry keep their whole-unit place in the view, as before. One player
+ * only; 0 draws the original steps. */
+int g_nativeHDSmoothCamera = 1;
+void *g_nativeHDCourseEntriesEnd;
+static int s_hdFollowDelta[3], s_hdFollowValid;
+static int s_hdDelta[3], s_hdDeltaValid, s_hdDeltaDone;
+static int s_hdPreviousDelta[3], s_hdPreviousValid;
+static int s_hdCourseShift[3], s_hdCourseShiftReady, s_hdCourseShiftOn;
+/* The filter, in 1/256 units: position estimate and step per update. */
+static int s_hdCamEstimate[3], s_hdCamStep[3], s_hdCamEstimateValid;
+static const struct Level *s_hdCamLevel;
+#define NATIVE_HD_CAMERA_CUT (64 * 256)
+#define NATIVE_HD_CAMERA_DELTA_LIMIT 384
+
+/* CAM_FollowDriver_Normal: camera 0 follows d this update. */
+void NativeHD_NoteFollowCamera(const struct CameraDC *cDC, const struct Driver *d)
+{
+    struct GameTracker *gGT = sdata->gGT;
+    if (cDC != &gGT->cameraDC[0] || gGT->numPlyrCurrGame != 1) return;
+    s_hdFollowDelta[0] = d->posCurr.x & 0xff;
+    s_hdFollowDelta[1] = d->posCurr.y & 0xff;
+    s_hdFollowDelta[2] = d->posCurr.z & 0xff;
+    s_hdFollowValid = 1;
+}
+
+/* The course moves by minus the sub-unit offset, in view space: -R * delta,
+ * delta in 1/(256 * scale) units, as a GTE translation fraction (1/4096). */
+static void NativeHD_SetCourseShift(const MATRIX *view, const int *delta, int scale)
+{
+    int r, c;
+    for (r = 0; r < 3; r++)
+    {
+        s64 sum = 0;
+        for (c = 0; c < 3; c++) sum += (s64)(s16)CTR_ReadU16LE(&view->m[r][c]) * delta[c];
+        s_hdCourseShift[r] = (int)(-sum / (256 * scale));
+    }
+    s_hdCourseShiftReady = 1;
+}
+
+/* Turn the course shift on around course draws and off after them. */
+void NativeHD_CourseShift(int on)
+{
+    int r;
+    on = on && s_hdCourseShiftReady;
+    if (on == s_hdCourseShiftOn) return;
+    for (r = 0; r < 3; r++) g_nativeGteTranslationFraction[r] += on ? s_hdCourseShift[r] : -s_hdCourseShift[r];
+    s_hdCourseShiftOn = on;
+}
+
+/* Any other view: an alpha-beta filter (1/4, 1/16) of the whole-unit
+ * positions keeps the sub-unit place of steady motion, even to about an
+ * eighth of a unit where whole units were a unit off, with no lag at a
+ * constant speed. A jump of more than 64 units is a cut and starts it again. */
+static void NativeHD_FilterCamera(struct GameTracker *gGT, const SVec3 *camera)
+{
+    int axis, cut = !s_hdCamEstimateValid || s_hdCamLevel != gGT->level1;
+    int position[3];
+    for (axis = 0; axis < 3; axis++)
+    {
+        position[axis] = NativeHD_VecAxis(camera, axis) * 256;
+        if (!cut)
+        {
+            int residual = position[axis] - (s_hdCamEstimate[axis] + s_hdCamStep[axis]);
+            if (residual > NATIVE_HD_CAMERA_CUT || residual < -NATIVE_HD_CAMERA_CUT) cut = 1;
+        }
+    }
+    s_hdCamLevel = gGT->level1;
+    s_hdCamEstimateValid = 1;
+    for (axis = 0; axis < 3; axis++)
+    {
+        int predicted, residual, delta;
+        if (cut)
+        {
+            s_hdCamEstimate[axis] = position[axis];
+            s_hdCamStep[axis] = 0;
+            s_hdDelta[axis] = 0;
+            continue;
+        }
+        predicted = s_hdCamEstimate[axis] + s_hdCamStep[axis];
+        residual = position[axis] - predicted;
+        s_hdCamEstimate[axis] = predicted + residual / 4;
+        s_hdCamStep[axis] += residual / 16;
+        delta = s_hdCamEstimate[axis] - position[axis];
+        if (delta > NATIVE_HD_CAMERA_DELTA_LIMIT) delta = NATIVE_HD_CAMERA_DELTA_LIMIT;
+        if (delta < -NATIVE_HD_CAMERA_DELTA_LIMIT) delta = -NATIVE_HD_CAMERA_DELTA_LIMIT;
+        s_hdDelta[axis] = delta;
+    }
+}
+
+/* This update's sub-unit camera offset, once: from its midpoint, which runs
+ * first, or its own frame. camera is the update's whole-unit camera. */
+static void NativeHD_UpdateCameraDelta(struct GameTracker *gGT, const SVec3 *camera)
+{
+    if (s_hdDeltaDone) return;
+    s_hdDeltaDone = 1;
+    if (!g_nativeHDSmoothCamera || gGT->numPlyrCurrGame != 1 || gGT->level1 == NULL)
+    {
+        s_hdDeltaValid = 0;
+        s_hdCamEstimateValid = 0;
+    }
+    else if (s_hdFollowValid)
+    {
+        memcpy(s_hdDelta, s_hdFollowDelta, sizeof(s_hdDelta));
+        s_hdDeltaValid = 1;
+        s_hdCamEstimateValid = 0;
+    }
+    else if ((gGT->gameMode1 & PAUSE_ALL) == 0)
+    {
+        NativeHD_FilterCamera(gGT, camera);
+        s_hdDeltaValid = 1;
+    }
+    s_hdFollowValid = 0;
+}
+
+/* Before an update's own instances and geometry draw: its camera offset,
+ * which the next update's midpoint averages with its own. */
+void NativeHD_PrepareCourseShift(struct GameTracker *gGT)
+{
+    NativeHD_CourseShift(0);
+    s_hdCourseShiftReady = 0;
+    NativeHD_UpdateCameraDelta(gGT, &gGT->pushBuffer[0].pos);
+    if (s_hdDeltaValid) NativeHD_SetCourseShift(&gGT->pushBuffer[0].matrix_ViewProj, s_hdDelta, 1);
+    memcpy(s_hdPreviousDelta, s_hdDelta, sizeof(s_hdPreviousDelta));
+    s_hdPreviousValid = s_hdDeltaValid;
+    s_hdDeltaDone = 0;
+}
+
 /* Widescreen draws the world across the screen and squeezes the authored
  * 4:3 UI to its middle. A world view in a menu's window (character and track
  * selection) sits inside UI frames: it is squeezed with them and keeps its
@@ -122,8 +257,11 @@ int NativeHD_IsMenuWindow(const struct PushBuffer *pb)
 }
 
 /* The HUD squeeze centres the authored 512-wide layout on the screen: PSX x
- * 0 lands 85 of its 1.875-pixel units in from the edge. */
-#define NATIVE_HD_SPLIT_HUD_MARGIN 85
+ * 0 lands 85 of its 1.875-pixel units in from the edge. Outer elements move
+ * out by 55 of them: the 4:3 layout's edge elements (x 10, the weapon and
+ * place number) land 75 pixels (5.9%) in, inside a TV's title-safe 90%. The
+ * full 85 put them 19 pixels in, where overscan hid the weapon. */
+#define NATIVE_HD_SPLIT_HUD_MARGIN 55
 
 static int NativeHD_DivRound3(int value)
 {
@@ -134,9 +272,9 @@ static int NativeHD_DivRound3(int value)
  * but the squeeze keeps the 4:3 layout around the screen's centre, which
  * pulled every player's outer elements (place number, weapon, meters) in
  * over the kart. Anchor each element to the nearer side of its viewport:
- * outer-half elements move out by the squeeze's margin and keep their 4:3
- * distance from the screen edge; inner ones already keep theirs from the
- * centre. Groups (a place number and its suffix; the fruit, its count and
+ * outer-half elements move out by NATIVE_HD_SPLIT_HUD_MARGIN, to the
+ * screen's title-safe edge; inner ones already keep their 4:3 distance
+ * from the centre. Groups (a place number and its suffix; the fruit, its count and
  * shine) lie in one half and keep their spacing. The shines draw in their
  * player's viewport, relative to its origin. Widescreen only, once. */
 void NativeHD_WidenSplitScreenHud(void)
@@ -391,6 +529,16 @@ void NativeHD_RenderIntermediate(struct GameTracker *gGT)
         /* The frustum from the midpoint camera culls; the view draws. */
         PushBuffer_UpdateFrustum(&gGT->pushBuffer[0]);
         NativeHD_AverageView(&gGT->pushBuffer[0].matrix_ViewProj, &previousView, &currentView, &s_hdCameraPosition, &currentPosition);
+        /* The course shift halfway: the mean of both updates' offsets, as
+         * the view is the mean of their whole-unit cameras. */
+        s_hdCourseShiftReady = 0;
+        NativeHD_UpdateCameraDelta(gGT, &currentPosition);
+        if (s_hdDeltaValid && s_hdPreviousValid)
+        {
+            int sum[3];
+            for (i = 0; i < 3; i++) sum[i] = s_hdDelta[i] + s_hdPreviousDelta[i];
+            NativeHD_SetCourseShift(&gGT->pushBuffer[0].matrix_ViewProj, sum, 2);
+        }
         MainFrame_VisMemFullFrame(gGT, level);
         /* Texture selection is an idempotent function of the current timer;
          * use the same selected frames in both renders of this update. */
@@ -420,7 +568,10 @@ void NativeHD_RenderIntermediate(struct GameTracker *gGT)
         RenderAllShadows(gGT);
         RenderAllHeatParticles(gGT);
         NativeHD_DrawFades(gGT);
+        NativeHD_CourseShift(1);
         RenderAllLevelGeometry(gGT, level, level->ptr_mesh_info);
+        NativeHD_CourseShift(0);
+        s_hdCourseShiftReady = 0;
         if ((gGT->gameMode1 & (GAME_CUTSCENE | ADVENTURE_ARENA | MAIN_MENU)) == 0) NativeHD_DrawCountdown(gGT);
         if ((gGT->renderFlags & RENDER_FLAG_CLEAR_BACK_BUFFER) != 0) CAM_ClearScreen(gGT);
         RenderDispEnv_World(gGT);

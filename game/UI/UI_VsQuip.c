@@ -4,6 +4,13 @@ u32 UI_VsQuipReadDriver(struct Driver *d, int offset, int size)
 {
 	char *data = (char *)d + offset;
 
+	// A Battle quip reads byte 1 of the int at 0x574: bits 8-15 in the PSX's
+	// little-endian layout, which is not the byte at 0x575 on a big-endian host.
+	if ((size == 1) && (offset == (int)OFFSETOF(struct Driver, NumMissilesComparedToNumAttacks) + 1))
+	{
+		return (u8)(d->NumMissilesComparedToNumAttacks >> 8);
+	}
+
 	if (size == 2)
 	{
 		return *(s16 *)data;
@@ -110,8 +117,50 @@ struct QuipMetaRaw
 
 CTR_STATIC_ASSERT(sizeof(struct QuipMetaRaw) == 0x18);
 
+// data850 keeps the retail executable's little-endian bytes, but the quip
+// code reads and updates its records as host fields (PSX pointers, driver
+// offsets, thresholds, priorities). On a big-endian host every pointer read
+// byte-swapped and the priority pass wrote to wild addresses, freezing the
+// console at the end of every multiplayer race. Store each field in host
+// order once; a little-endian host writes back the same bytes.
+static void UI_VsQuipFieldsToHost(u8 *table, u32 start, u32 end, u32 stride, const u8 *sizes, int numSizes)
+{
+	for (u32 record = start; record + stride <= end; record += stride)
+	{
+		u8 *field = table + record;
+
+		for (int i = 0; i < numSizes; i++)
+		{
+			if (sizes[i] == 2)
+			{
+				*(u16 *)field = CTR_ReadU16LE(field);
+			}
+			else
+			{
+				*(u32 *)field = CTR_ReadU32LE(field);
+			}
+
+			field += sizes[i];
+		}
+	}
+}
+
 static u8 *UI_VsQuipData(void)
 {
+	static int s_hostOrder;
+
+	if (!s_hostOrder)
+	{
+		static const u8 strFields[] = {2, 2, 4};
+		static const u8 metaFields[] = {4, 4, 2, 2, 4, 4, 4};
+
+		UI_VsQuipFieldsToHost(data.data850, 0, UI_QUIP_VS_META_OFF, sizeof(struct QuipStr), strFields, len(strFields));
+		UI_VsQuipFieldsToHost(data.data850, UI_QUIP_VS_META_OFF, UI_QUIP_VS_META_END, sizeof(struct QuipMetaRaw), metaFields, len(metaFields));
+		UI_VsQuipFieldsToHost(data.data850, UI_QUIP_VS_META_END, UI_QUIP_BAT_META_OFF, sizeof(struct QuipStr), strFields, len(strFields));
+		UI_VsQuipFieldsToHost(data.data850, UI_QUIP_BAT_META_OFF, UI_QUIP_BAT_META_END, sizeof(struct QuipMetaRaw), metaFields, len(metaFields));
+		s_hostOrder = 1;
+	}
+
 	return data.data850;
 }
 

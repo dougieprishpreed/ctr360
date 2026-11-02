@@ -3,6 +3,18 @@
 #include <platform/native_log.h>
 #endif
 
+#ifdef CTR_NATIVE
+/* Levels that load into the sub-pack beside the current one: the five
+ * adventure hubs, and the scenes the intro and credits cutscenes preload
+ * (CS_OPCODE_REQUEST_LEVEL) before swapping to them. Taking only the hubs
+ * dropped the credits' next scene, and their swap waited on a black screen. */
+static int LOAD_Hub_IsSubpackLevel(int levID)
+{
+	return ((u32)(levID - GEM_STONE_VALLEY) < LOAD_ADV_HUB_COUNT) || ((u32)(levID - INTRO_RACE_TODAY) < LOAD_INTRO_CUTSCENE_COUNT) ||
+	       ((u32)(levID - CREDITS_CRASH) < (u32)(SCRAPBOOK - CREDITS_CRASH));
+}
+#endif
+
 // packID will always be 3-gGT->activeMempackIndex
 void LOAD_Hub_ReadFile(struct BigHeader *bigfile, int levID, int packID)
 {
@@ -13,11 +25,25 @@ void LOAD_Hub_ReadFile(struct BigHeader *bigfile, int levID, int packID)
 	 * also means its three-file load has not finished yet, not just that a
 	 * mask overwrote it. Never reset an allocator underneath a queued read
 	 * or reuse the talking mask's model while its instance is alive. */
-	if (sdata->load_inProgress || sdata->queueLength || !sdata->queueReady || sdata->AkuAkuHintState != 0)
-		return;
 	if (packID < LOAD_FIRST_SUBPACK_INDEX || packID > LOAD_SECOND_SUBPACK_INDEX ||
-	    packID == gGT->activeMempackIndex || (u32)(levID - GEM_STONE_VALLEY) >= LOAD_ADV_HUB_COUNT)
+	    packID == gGT->activeMempackIndex || !LOAD_Hub_IsSubpackLevel(levID))
 		return;
+	if ((u32)(levID - GEM_STONE_VALLEY) < LOAD_ADV_HUB_COUNT)
+	{
+		if (sdata->load_inProgress || sdata->queueLength || !sdata->queueReady || sdata->AkuAkuHintState != 0)
+			return;
+	}
+	else
+	{
+		/* A cutscene asks for its next scene once: let a queued read
+		 * finish rather than drop the request. */
+		while (sdata->load_inProgress || sdata->queueLength || !sdata->queueReady)
+		{
+			LOAD_NextQueuedFile();
+			CDSYS_XAPauseAtEnd();
+			VSync(0);
+		}
+	}
 #endif
 
 	// if level is already loaded, quit
@@ -82,7 +108,7 @@ void LOAD_Hub_SwapNow()
 			CDSYS_XAPauseAtEnd();
 			VSync(0);
 		}
-		if ((u32)(destination - GEM_STONE_VALLEY) >= LOAD_ADV_HUB_COUNT)
+		if (!LOAD_Hub_IsSubpackLevel(destination))
 		{
 			Platform_Log("[load] hub swap deferred: no destination from level=%d pack=%d\n", gGT->levelID, packID);
 			return;

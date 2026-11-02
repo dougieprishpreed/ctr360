@@ -389,6 +389,85 @@ void MakeLineArray(GrVertex *vertex, VERTTYPE *p0, VERTTYPE *p1)
 	} // TODO diagonal line alignment
 }
 
+#if defined(_XBOX)
+#include <math.h>
+
+/* [graphics] close_seams: the level drawer splits nearby ground blocks up to
+ * twice and clips them at the near plane, so neighbours meet at corners one
+ * side has and the other does not (T-junctions); each corner snaps to whole
+ * PlayStation pixels on its own and hairline gaps open, black against the
+ * cleared screen. Each opaque on-screen polygon the level drawer wrote this
+ * frame (its prim lies in the range MainFrame_RenderFrame records around
+ * RenderAllLevelGeometry) is grown by half a PlayStation pixel along every
+ * edge, in the lanes the shader adds (1/64 pixel): neighbours overlap and
+ * gaps up to a pixel close. Translucent ones (water), objects, the UI and
+ * off-screen draws keep their edges. */
+int g_nativeCloseSeams = 1;
+const u8 *g_nativeLevelPrimStart;
+const u8 *g_nativeLevelPrimEnd;
+static bool s_gpuPolySemiTrans;
+#define NATIVE_GPU_SEAM_GROWTH 0.5f
+
+static void NativeGpu_CloseSeams(GrVertex *vertex, int count, const VERTTYPE *prim)
+{
+	float area = 0.0f, side;
+
+	if (!g_nativeCloseSeams || (s_nativeUIPass != 0) || !activeDrawEnv.dfe || s_gpuPolySemiTrans ||
+	    ((const u8 *)prim < g_nativeLevelPrimStart) || ((const u8 *)prim >= g_nativeLevelPrimEnd))
+	{
+		return;
+	}
+
+	for (int i = 0; i < count; i++)
+	{
+		const GrVertex *a = &vertex[i], *c = &vertex[(i + 1) % count];
+		area += (float)a->x * c->y - (float)c->x * a->y;
+	}
+	// Null polygons (the texture-page hack) and slivers keep their corners.
+	if (fabsf(area) < 1.0f)
+	{
+		return;
+	}
+	side = (area > 0.0f) ? 1.0f : -1.0f;
+
+	for (int i = 0; i < count; i++)
+	{
+		const GrVertex *prev = &vertex[(i + count - 1) % count], *at = &vertex[i], *next = &vertex[(i + 1) % count];
+		float ax = (float)(at->x - prev->x), ay = (float)(at->y - prev->y);
+		float bx = (float)(next->x - at->x), by = (float)(next->y - at->y);
+		float la = sqrtf(ax * ax + ay * ay), lb = sqrtf(bx * bx + by * by);
+		float nx, ny, mx, my, length, cosHalf, reach;
+
+		if ((la < 0.001f) || (lb < 0.001f))
+		{
+			continue;
+		}
+		// Outward normals of both edges; the corner moves along their
+		// bisector far enough to push each edge out by the growth (a 45-degree
+		// corner of a split quad too), at most four times that at a sliver's tip.
+		nx = side * ay / la;
+		ny = -side * ax / la;
+		mx = nx + side * by / lb;
+		my = ny - side * bx / lb;
+		length = sqrtf(mx * mx + my * my);
+		if (length < 0.001f)
+		{
+			continue;
+		}
+		mx /= length;
+		my /= length;
+		cosHalf = mx * nx + my * ny;
+		reach = NATIVE_GPU_SEAM_GROWTH / ((cosHalf > 0.25f) ? cosHalf : 0.25f) * 64.0f;
+		if (reach > 127.0f)
+		{
+			reach = 127.0f;
+		}
+		vertex[i]._p0 = (s8)floorf(mx * reach + 0.5f);
+		vertex[i]._p1 = (s8)floorf(my * reach + 0.5f);
+	}
+}
+#endif
+
 void MakeVertexTriangle(GrVertex *vertex, VERTTYPE *p0, VERTTYPE *p1, VERTTYPE *p2)
 {
 	assert(p0);
@@ -408,6 +487,9 @@ void MakeVertexTriangle(GrVertex *vertex, VERTTYPE *p0, VERTTYPE *p1, VERTTYPE *
 
 	vertex[2].x = p2[0] + ofsX;
 	vertex[2].y = p2[1] + ofsY;
+#if defined(_XBOX)
+	NativeGpu_CloseSeams(vertex, 3, p0);
+#endif
 }
 
 void MakeVertexQuad(GrVertex *vertex, VERTTYPE *p0, VERTTYPE *p1, VERTTYPE *p2, VERTTYPE *p3)
@@ -433,6 +515,10 @@ void MakeVertexQuad(GrVertex *vertex, VERTTYPE *p0, VERTTYPE *p1, VERTTYPE *p2, 
 
 	vertex[3].x = p3[0] + ofsX;
 	vertex[3].y = p3[1] + ofsY;
+#if defined(_XBOX)
+	// Called with the corners in perimeter order (0, 1, 3, 2).
+	NativeGpu_CloseSeams(vertex, 4, p0);
+#endif
 }
 
 void MakeVertexRect(GrVertex *vertex, VERTTYPE *p0, s16 w, s16 h)
@@ -900,6 +986,10 @@ internal void NativeGpu_PrepareFramebufferFeedback(int tpage)
 internal void AddSplit(bool semiTrans, bool textured, bool framebufferFeedback)
 {
 	int tpage = activeDrawEnv.tpage;
+#if defined(_XBOX)
+	// Every polygon adds its split before its vertices: close_seams reads this.
+	s_gpuPolySemiTrans = semiTrans;
+#endif
 
 	if (framebufferFeedback)
 	{

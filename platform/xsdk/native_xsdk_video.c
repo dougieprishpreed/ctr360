@@ -470,6 +470,7 @@ static void XvCreatePasses(void)
         XV_CALL(vkCreateRenderPass(xv.device,&info,NULL,&xv.passes[i]));
     }
 }
+extern int g_nativeCloseSeams;
 static void XvConfig(const char *section,const char *key,const char *value,void *context)
 {
     (void)context;
@@ -483,6 +484,7 @@ static void XvConfig(const char *section,const char *key,const char *value,void 
     if(!strcmp(key,"texture_filter"))g_cfg_bilinearFiltering=enabled;
     if(!strcmp(key,"edge_aa"))xvEdgeAA=enabled;
     if(!strcmp(key,"widescreen"))g_nativeHDWidescreen=enabled;
+    if(!strcmp(key,"close_seams"))g_nativeCloseSeams=enabled;
     if(!strcmp(key,"steady"))xvSteady=enabled;
 }
 int NativeRenderer_InitialiseRender(char *name,int width,int height,int fullscreen)
@@ -491,8 +493,8 @@ int NativeRenderer_InitialiseRender(char *name,int width,int height,int fullscre
     NativeConfig_Read("game:/ctr360.ini",XvConfig,NULL);
     VIDEO_MODE video={0};VdQueryVideoMode(&video);
     NativeHD_WidenSplitScreenHud();
-    Platform_Log("[graphics] interpolation=%d steady=%d texture_filter=%d edge_aa=%d widescreen=%d output=%ux%u%s self_test=%d screenshot=%d\n",
-        g_nativeHDEnableInterpolation,xvSteady,g_cfg_bilinearFiltering,xvEdgeAA,g_nativeHDWidescreen,
+    Platform_Log("[graphics] interpolation=%d steady=%d texture_filter=%d edge_aa=%d widescreen=%d close_seams=%d output=%ux%u%s self_test=%d screenshot=%d\n",
+        g_nativeHDEnableInterpolation,xvSteady,g_cfg_bilinearFiltering,xvEdgeAA,g_nativeHDWidescreen,g_nativeCloseSeams,
         (unsigned)video.display_width,(unsigned)video.display_height,video.is_widescreen?" widescreen":"",xvSelfTest,xvScreenshots);
     const char *instanceExtensions[]={VK_KHR_SURFACE_EXTENSION_NAME,VK_KHR_DISPLAY_EXTENSION_NAME};
     const char *deviceExtensions[]={VK_KHR_SWAPCHAIN_EXTENSION_NAME};

@@ -429,6 +429,29 @@ u32 main(void)
 				gGT->hudFlags &= HUD_FLAG_CLEAR_RACE_HUD_MASK;
 			}
 
+#if defined(CTR_INTERNAL) && !defined(_XBOX)
+			// Test aid, CTR_TEST_LEVEL=<id> [CTR_TEST_MODE1/2=<hex>]: once the
+			// main menu is idle, load that level with those mode flags (e.g. 42
+			// with 60080000 runs the ending into the credits).
+			{
+				static int s_testJumped;
+				const char *testLevel = getenv("CTR_TEST_LEVEL");
+				if (!s_testJumped && (testLevel != NULL) && (gGT->levelID == MAIN_MENU_LEVEL) && (sdata->Loading.stage == LOAD_IDLE))
+				{
+					const char *mode1 = getenv("CTR_TEST_MODE1");
+					const char *mode2 = getenv("CTR_TEST_MODE2");
+					s_testJumped = 1;
+					// Leave the title as its own exits do: its menu would keep
+					// counting down to the attract demo in the new level.
+					if (sdata->ptrActiveMenu != NULL) RECTMENU_Hide(sdata->ptrActiveMenu);
+					sdata->ptrActiveMenu = NULL;
+					if (mode1 != NULL) gGT->gameMode1 = (u32)strtoul(mode1, NULL, 16);
+					if (mode2 != NULL) gGT->gameMode2 = (u32)strtoul(mode2, NULL, 16);
+					MainRaceTrack_RequestLoad((s16)atoi(testLevel));
+				}
+			}
+#endif
+
 			// reset vsync calls between drawsync
 #ifdef _XBOX
 			Platform_WatchStage("render-intermediate");

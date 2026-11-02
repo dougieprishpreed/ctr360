@@ -85,6 +85,9 @@ static struct Level *s_hdLevel;
 static SVec3 s_hdCameraPosition;
 static SVec3 s_hdCameraRotation;
 extern int g_nativeGteTranslationFraction[3];
+/* [graphics] close_seams (native_gpu.c): the level drawer's polygons. */
+extern const u8 *g_nativeLevelPrimStart;
+extern const u8 *g_nativeLevelPrimEnd;
 static s16 NativeHD_VecAxis(const SVec3 *v, int axis);
 
 /* The in-between view as the average of the update before's view and this
@@ -446,7 +449,9 @@ void NativeHD_RenderIntermediate(struct GameTracker *gGT)
         RenderAllShadows(gGT);
         RenderAllHeatParticles(gGT);
         NativeHD_DrawFades(gGT);
+        g_nativeLevelPrimStart = (const u8 *)gGT->backBuffer->primMem.cursor;
         RenderAllLevelGeometry(gGT, level, level->ptr_mesh_info);
+        g_nativeLevelPrimEnd = (const u8 *)gGT->backBuffer->primMem.cursor;
         if ((gGT->gameMode1 & (GAME_CUTSCENE | ADVENTURE_ARENA | MAIN_MENU)) == 0) NativeHD_DrawCountdown(gGT);
         if ((gGT->renderFlags & RENDER_FLAG_CLEAR_BACK_BUFFER) != 0) CAM_ClearScreen(gGT);
         RenderDispEnv_World(gGT);

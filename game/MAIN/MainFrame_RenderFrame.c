@@ -13,6 +13,11 @@
 volatile int gCtrDebugSkipLevelGeometry = 0;
 #endif
 
+#ifdef _XBOX
+extern const u8 *g_nativeLevelPrimStart;
+extern const u8 *g_nativeLevelPrimEnd;
+#endif
+
 static void MainFrame_TraceLateRender(const char *step)
 {
 #ifdef CTR_NATIVE
@@ -179,7 +184,14 @@ void MainFrame_RenderFrame(struct GameTracker *gGT, struct GamepadSystem *gGamep
 		{
 			MAINFRAME_PERF_BEGIN(NATIVE_PERF_BUCKET_MAINFRAME_LEVEL_GEOMETRY);
 			MainFrame_TraceLateRender("geometry-enter");
+#ifdef _XBOX
+			// [graphics] close_seams (native_gpu.c) grows the polygons written here.
+			g_nativeLevelPrimStart = (const u8 *)gGT->backBuffer->primMem.cursor;
+#endif
 			RenderAllLevelGeometry(gGT, lev, ptr_mesh_info);
+#ifdef _XBOX
+			g_nativeLevelPrimEnd = (const u8 *)gGT->backBuffer->primMem.cursor;
+#endif
 			MainFrame_TraceLateRender("geometry-exit");
 			MAINFRAME_PERF_END(NATIVE_PERF_BUCKET_MAINFRAME_LEVEL_GEOMETRY);
 		}

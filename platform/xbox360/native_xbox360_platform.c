@@ -328,10 +328,14 @@ void Platform_EndScene(void)
 	}
 }
 
+void NativeGte_SubpixelNextFrame(void);
+
 void Platform_EndFrame(void)
 {
 	Platform_EndScene();
 	Platform_CalcFPS();
+	// The next frame (or in-between frame) projects its own sub-pixel places.
+	NativeGte_SubpixelNextFrame();
 }
 
 void Platform_PresentVRAMDisplay(void)

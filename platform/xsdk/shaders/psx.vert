@@ -10,7 +10,11 @@ layout(location=1) out vec4 tc;
 layout(location=2) out vec4 page;
 layout(location=3) out vec4 uvRange;
 void main() {
-    vec2 xy=vec2((position.x-s.scale.y)*s.scale.x+s.scale.y,position.y);
+    // A world polygon's vertex keeps its exact projected place: its offset from
+    // the whole PlayStation pixel, in 1/64 pixel, rides in extra.zw ([graphics]
+    // subpixel). The dither below stays on the whole-pixel grid.
+    vec2 at=position.xy+extra.zw*(1.0/64.0);
+    vec2 xy=vec2((at.x-s.scale.y)*s.scale.x+s.scale.y,at.y);
     gl_Position=vec4((xy/s.rect.zw)*2.0-1.0,0.0,1.0);
     // Pixel shading no longer needs brightness or vertex alpha. Carry the
     // two dither coordinates in those lanes instead of a fourth interpolator.

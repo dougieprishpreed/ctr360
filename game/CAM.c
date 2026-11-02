@@ -1101,7 +1101,7 @@ void CAM_SetDesiredPosRot(struct CameraDC *cDC, const SVec3 *pos, const SVec3 *r
 }
 
 #ifdef _XBOX
-// MainHD.c: [graphics] smooth_camera notes which kart camera 0 follows.
+// MainHD.c: [graphics] subpixel notes which kart camera 0 follows.
 void NativeHD_NoteFollowCamera(const struct CameraDC *cDC, const struct Driver *d);
 #endif
 

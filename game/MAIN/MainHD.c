@@ -111,17 +111,19 @@ int g_nativeHDEnableInterpolation = 1;
  * HUD in a centred 4:3 area; 0 keeps the original 4:3 view. Boot-time only. */
 int g_nativeHDWidescreen = 1;
 
-/* [graphics] smooth_camera: the follow camera and the karts stand on whole
- * units, so at low speed the course passed in uneven steps (5, 4, 6 units an
- * update) and the ground juddered; at speed the same unit is lost in the
- * motion. With 1, the course (level geometry and course instances, queued
- * before the others) is drawn shifted by the camera's sub-unit place, as if
- * it rode its exact path: while it follows the kart, the kart's own sub-unit
- * position; for every other view (the race flyby, end-of-race shots), what a
- * steady-motion filter of its whole-unit positions finds. Karts and what
- * they carry keep their whole-unit place in the view, as before. One player
- * only; 0 draws the original steps. */
-int g_nativeHDSmoothCamera = 1;
+/* [graphics] subpixel, with native_gte_core.c's exact projections: the
+ * follow camera and the karts stand on whole units, so at low speed the
+ * course passed in uneven steps (5, 4, 6 units an update). The course
+ * (level geometry, course instances queued before the others, and skid
+ * marks) is drawn shifted by the camera's sub-unit place, as if it rode its
+ * exact path: while it follows the kart, the kart's own sub-unit position;
+ * for every other view (the race flyby, end-of-race shots), what a
+ * steady-motion filter of its whole-unit positions finds. The shift is a
+ * GTE translation fraction, which the GTE's whole-unit view space drops: it
+ * shows only through the exact projections, so one setting drives both.
+ * Karts and what they carry keep their whole-unit place in the view. One
+ * player only. */
+extern int g_nativeGteSubpixel;
 void *g_nativeHDCourseEntriesEnd;
 static int s_hdFollowDelta[3], s_hdFollowValid;
 static int s_hdDelta[3], s_hdDeltaValid, s_hdDeltaDone;
@@ -214,7 +216,7 @@ static void NativeHD_UpdateCameraDelta(struct GameTracker *gGT, const SVec3 *cam
 {
     if (s_hdDeltaDone) return;
     s_hdDeltaDone = 1;
-    if (!g_nativeHDSmoothCamera || gGT->numPlyrCurrGame != 1 || gGT->level1 == NULL)
+    if (!g_nativeGteSubpixel || gGT->numPlyrCurrGame != 1 || gGT->level1 == NULL)
     {
         s_hdDeltaValid = 0;
         s_hdCamEstimateValid = 0;

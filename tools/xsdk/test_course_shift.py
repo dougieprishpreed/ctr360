@@ -1,4 +1,4 @@
-"""[graphics] smooth_camera: the actual course shift code (game/MAIN/MainHD.c) on whole-unit cameras.
+"""[graphics] subpixel's course shift: the actual code (game/MAIN/MainHD.c) on whole-unit cameras.
 
 Cameras stand on whole units, so a slow camera (the race flyby, or one following a
 kart at low speed) moves the course in uneven steps: 3, 4, 3, 3, 4 units an update.
@@ -7,7 +7,7 @@ the kart's own sub-unit position; otherwise what an alpha-beta filter of the
 whole-unit positions finds. Checks, through the GTE translation fraction the shift
 becomes: a flyby at an uneven speed draws the course at even steps (to a fifth of a
 unit, from a whole unit) after a second, a cut starts over without a shift, a followed kart's
-fraction is used exactly, pausing keeps the last shift, 0 turns it off, and the
+fraction is used exactly, pausing keeps the last shift, subpixel = 0 turns it off, and the
 fraction comes back to its value after each course draw. Negative control: the
 whole-unit steps the course moved in before.
 """
@@ -17,9 +17,9 @@ p = argparse.ArgumentParser(); p.add_argument('--out', type=Path, required=True)
 a = p.parse_args(); a.out.mkdir(parents=True, exist_ok=True)
 root = Path(__file__).resolve().parents[2]
 hd = (root / 'game/MAIN/MainHD.c').read_text()
-begin = hd.index('int g_nativeHDSmoothCamera = 1;')
+begin = hd.index('extern int g_nativeGteSubpixel;')
 end = hd.index('/* Widescreen draws the world across the screen', begin)
-code = hd[begin:end]
+code = hd[begin:end].replace('extern int g_nativeGteSubpixel;', '')
 c = r'''
 #include <assert.h>
 #include <math.h>
@@ -40,6 +40,7 @@ static struct GameTracker tracker; static struct Level course;
 static struct { struct GameTracker *gGT; } state = {&tracker}, *sdata = &state;
 static u16 CTR_ReadU16LE(const void *p) { u16 v; memcpy(&v, p, 2); return v; }
 static int g_nativeGteTranslationFraction[3];
+static int g_nativeGteSubpixel = 1;
 static s16 NativeHD_VecAxis(const SVec3 *v, int axis) { return axis == 0 ? v->x : (axis == 1 ? v->y : v->z); }
 CODE
 /* Identity rotation: view space = world space, so the shift is -16 * delta (1/4096 units). */
@@ -96,12 +97,12 @@ int main(void)
     tracker.gameMode1 = PAUSE_ALL; Update(followed, drawn);
     assert(fabs(drawn[0] - (1234 + 77 / 256.0)) < 1e-9);
     tracker.gameMode1 = 0;
-    /* Two or more players and smooth_camera = 0 draw the whole-unit steps. */
+    /* Two or more players and subpixel = 0 draw the whole-unit steps. */
     tracker.numPlyrCurrGame = 2; NativeHD_NoteFollowCamera(&tracker.cameraDC[0], &kart); Update(followed, drawn);
     for (int i = 0; i < 3; i++) assert(drawn[i] == followed[i]);
-    tracker.numPlyrCurrGame = 1; g_nativeHDSmoothCamera = 0; NativeHD_NoteFollowCamera(&tracker.cameraDC[0], &kart); Update(followed, drawn);
+    tracker.numPlyrCurrGame = 1; g_nativeGteSubpixel = 0; NativeHD_NoteFollowCamera(&tracker.cameraDC[0], &kart); Update(followed, drawn);
     for (int i = 0; i < 3; i++) assert(drawn[i] == followed[i]);
-    printf("PASS: flyby course steps even to %.3f units (whole-unit steps were up to %.2f off); cut, kart follow, pause, split-screen and smooth_camera=0 checked\n", worst, wholeUnitWorst);
+    printf("PASS: flyby course steps even to %.3f units (whole-unit steps were up to %.2f off); cut, kart follow, pause, split-screen and subpixel=0 checked\n", worst, wholeUnitWorst);
     return 0;
 }
 '''.replace('CODE', code)

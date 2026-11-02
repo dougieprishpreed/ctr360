@@ -14,7 +14,7 @@ volatile int gCtrDebugSkipLevelGeometry = 0;
 #endif
 
 #ifdef _XBOX
-// MainHD.c: [graphics] smooth_camera's sub-unit shift for course draws.
+// MainHD.c: [graphics] subpixel's sub-unit shift for course draws.
 extern void *g_nativeHDCourseEntriesEnd;
 void NativeHD_PrepareCourseShift(struct GameTracker *gGT);
 void NativeHD_CourseShift(int on);

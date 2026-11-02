@@ -8,6 +8,11 @@
 #include <psx/gtereg.h>
 #include <psx/libgte.h>
 
+#if defined(_XBOX)
+#include <math.h>
+#include <string.h>
+#endif
+
 GTERegisters gteRegs;
 
 #define GTE_SF(op)    ((op >> 19) & 1)
@@ -306,11 +311,139 @@ internal int Lm_H(s64 value, int sf)
 	return value_12;
 }
 
+#if defined(_XBOX)
+/* [graphics] subpixel: the GTE keeps view space in whole units and the
+ * screen in whole PSX pixels, 2.5-3.3 pixels each at 720p, so at low speed
+ * the ground moved in uneven steps and its textures swam. Each projection's
+ * exact place, from the untruncated view position, is kept as an offset
+ * from its whole-pixel result in 1/64 pixel, keyed by that result for the
+ * frame; native_gpu.c gives it to world polygons. The same point projected
+ * again agrees with itself; two different points at one pixel with
+ * different offsets make it ambiguous, and it keeps the whole pixel. A
+ * frame projects a few thousand points; 16K slots (128 KB) stay in cache. */
+int g_nativeGteSubpixel = 1;
+#define NATIVE_GTE_SUBPIXEL_BITS     14
+#define NATIVE_GTE_SUBPIXEL_SLOTS    (1 << NATIVE_GTE_SUBPIXEL_BITS)
+#define NATIVE_GTE_SUBPIXEL_PROBES   4
+#define NATIVE_GTE_SUBPIXEL_AMBIGUOUS (-128)
+typedef struct
+{
+	u32 key;
+	u16 frame;
+	s8 dx, dy;
+} NativeGteSubpixel;
+static NativeGteSubpixel s_gteSubpixel[NATIVE_GTE_SUBPIXEL_SLOTS];
+static u16 s_gteSubpixelFrame = 1;
+
+static u32 NativeGte_SubpixelSlot(u32 key)
+{
+	return (key * 2654435761u) >> (32 - NATIVE_GTE_SUBPIXEL_BITS);
+}
+
+static void NativeGte_NoteSubpixel(s64 viewX, s64 viewY, s64 viewZ)
+{
+	double h, x, y;
+	int dx, dy;
+	u32 key, slot;
+
+	// Not in front of the eye by a unit, or not in whole units (sf 0): the
+	// GTE's own result stands.
+	if (!m_sf || (viewZ < (1 << 12)))
+	{
+		return;
+	}
+
+	h = (double)(u16)C2_H / (double)viewZ;
+	x = (double)C2_OFX / 65536.0 + (double)viewX * h - (double)C2_SX2;
+	y = (double)C2_OFY / 65536.0 + (double)viewY * h - (double)C2_SY2;
+	if ((x <= -1.98) || (x >= 1.98) || (y <= -1.98) || (y >= 1.98))
+	{
+		return;
+	}
+
+	dx = (int)floor(x * 64.0 + 0.5);
+	dy = (int)floor(y * 64.0 + 0.5);
+	key = (u16)C2_SX2 | ((u32)(u16)C2_SY2 << 16);
+	slot = NativeGte_SubpixelSlot(key);
+	for (int probe = 0; probe < NATIVE_GTE_SUBPIXEL_PROBES; probe++, slot = (slot + 1) & (NATIVE_GTE_SUBPIXEL_SLOTS - 1))
+	{
+		NativeGteSubpixel *entry = &s_gteSubpixel[slot];
+
+		if (entry->frame != s_gteSubpixelFrame)
+		{
+			entry->key = key;
+			entry->frame = s_gteSubpixelFrame;
+			entry->dx = (s8)dx;
+			entry->dy = (s8)dy;
+			return;
+		}
+
+		if (entry->key == key)
+		{
+			if ((entry->dx != dx) || (entry->dy != dy))
+			{
+				entry->dx = NATIVE_GTE_SUBPIXEL_AMBIGUOUS;
+			}
+			return;
+		}
+	}
+}
+
+/* The offset this frame's projections give the whole-pixel place (x, y). */
+int NativeGte_SubpixelOffset(s16 x, s16 y, s8 *dx, s8 *dy)
+{
+	u32 key = (u16)x | ((u32)(u16)y << 16);
+	u32 slot = NativeGte_SubpixelSlot(key);
+
+	if (!g_nativeGteSubpixel)
+	{
+		return 0;
+	}
+
+	for (int probe = 0; probe < NATIVE_GTE_SUBPIXEL_PROBES; probe++, slot = (slot + 1) & (NATIVE_GTE_SUBPIXEL_SLOTS - 1))
+	{
+		const NativeGteSubpixel *entry = &s_gteSubpixel[slot];
+
+		if (entry->frame != s_gteSubpixelFrame)
+		{
+			return 0;
+		}
+
+		if (entry->key == key)
+		{
+			if (entry->dx == NATIVE_GTE_SUBPIXEL_AMBIGUOUS)
+			{
+				return 0;
+			}
+			*dx = entry->dx;
+			*dy = entry->dy;
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
+/* Platform_EndFrame: the next frame's projections start a new table. */
+void NativeGte_SubpixelNextFrame(void)
+{
+	s_gteSubpixelFrame++;
+	if (s_gteSubpixelFrame == 0)
+	{
+		memset(s_gteSubpixel, 0, sizeof(s_gteSubpixel));
+		s_gteSubpixelFrame = 1;
+	}
+}
+#endif
+
 internal int GTE_RotTransPers(int idx, int lm)
 {
-	C2_MAC1 = A1(/*int44*/ (s64)((s64)C2_TRX << 12) + g_nativeGteTranslationFraction[0] + (C2_R11 * VX(idx)) + (C2_R12 * VY(idx)) + (C2_R13 * VZ(idx)));
-	C2_MAC2 = A2(/*int44*/ (s64)((s64)C2_TRY << 12) + g_nativeGteTranslationFraction[1] + (C2_R21 * VX(idx)) + (C2_R22 * VY(idx)) + (C2_R23 * VZ(idx)));
-	C2_MAC3 = A3(/*int44*/ (s64)((s64)C2_TRZ << 12) + g_nativeGteTranslationFraction[2] + (C2_R31 * VX(idx)) + (C2_R32 * VY(idx)) + (C2_R33 * VZ(idx)));
+	s64 viewX = (s64)((s64)C2_TRX << 12) + g_nativeGteTranslationFraction[0] + (C2_R11 * VX(idx)) + (C2_R12 * VY(idx)) + (C2_R13 * VZ(idx));
+	s64 viewY = (s64)((s64)C2_TRY << 12) + g_nativeGteTranslationFraction[1] + (C2_R21 * VX(idx)) + (C2_R22 * VY(idx)) + (C2_R23 * VZ(idx));
+	s64 viewZ = (s64)((s64)C2_TRZ << 12) + g_nativeGteTranslationFraction[2] + (C2_R31 * VX(idx)) + (C2_R32 * VY(idx)) + (C2_R33 * VZ(idx));
+	C2_MAC1 = A1(/*int44*/ viewX);
+	C2_MAC2 = A2(/*int44*/ viewY);
+	C2_MAC3 = A3(/*int44*/ viewZ);
 	C2_IR1 = Lm_B1(C2_MAC1, lm);
 	C2_IR2 = Lm_B2(C2_MAC2, lm);
 	C2_IR3 = Lm_B3_sf(m_mac3, m_sf, lm);
@@ -323,6 +456,12 @@ internal int GTE_RotTransPers(int idx, int lm)
 	C2_SXY1 = C2_SXY2;
 	C2_SX2 = Lm_G1(F((s64)C2_OFX + ((s64)C2_IR1 * h_over_sz3)) >> 16);
 	C2_SY2 = Lm_G2(F((s64)C2_OFY + ((s64)C2_IR2 * h_over_sz3)) >> 16);
+#if defined(_XBOX)
+	if (g_nativeGteSubpixel)
+	{
+		NativeGte_NoteSubpixel(viewX, viewY, viewZ);
+	}
+#endif
 
 	return h_over_sz3;
 }

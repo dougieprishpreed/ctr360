@@ -65,6 +65,45 @@ static int NativeHD_FindPreviousPose(struct Instance *instance, struct Model *mo
 static struct Level *s_hdLevel;
 static SVec3 s_hdCameraPosition;
 static SVec3 s_hdCameraRotation;
+extern int g_nativeGteTranslationFraction[3];
+static s16 NativeHD_VecAxis(const SVec3 *v, int axis);
+
+/* The in-between view as the average of the update before's view and this
+ * one's (NativeHD_RenderIntermediate builds it): a static point lands exactly halfway
+ * between its places in the two frames. Rebuilt from the camera's midpoint
+ * in whole world units and angle steps, the view stood half a unit short on
+ * odd steps; with vertices snapped to whole pixels, at low speed the ground
+ * jumped back in every second frame. A view is M * V + t with t about
+ * -M * camera, the two large terms cancelling near the camera; a rotation
+ * element whose sum is odd rounds down half a step, so the translation takes
+ * that step back at the midpoint camera, and what is left grows with the
+ * distance from the camera, not with the world's coordinates. The
+ * translation, in TR << 12 units, keeps its part below a world unit for the
+ * GTE's perspective transforms. The rotations' average is a hair short of a
+ * rotation across a turn; at the camera-jump gate's limit it scales the view
+ * by 2%, between ordinary updates far less. ViewProj keeps the retail
+ * little-endian layout (PushBuffer_SetMatrixVP). */
+static void NativeHD_AverageView(MATRIX *view, const MATRIX *previous, const MATRIX *current, const SVec3 *previousCamera,
+                                 const SVec3 *currentCamera)
+{
+    int r, c, odd[3][3];
+    for (r = 0; r < 3; r++)
+        for (c = 0; c < 3; c++)
+        {
+            int sum = (s16)CTR_ReadU16LE(&previous->m[r][c]) + (s16)CTR_ReadU16LE(&current->m[r][c]);
+            CTR_WriteU16LE(&view->m[r][c], (u16)(s16)(sum >> 1));
+            odd[r][c] = sum & 1;
+        }
+    for (r = 0; r < 3; r++)
+    {
+        s64 translation = ((s64)(s32)CTR_ReadU32LE(&previous->t[r]) + (s32)CTR_ReadU32LE(&current->t[r])) * 0x800;
+        for (c = 0; c < 3; c++)
+            if (odd[r][c])
+                translation += ((s64)NativeHD_VecAxis(previousCamera, c) + NativeHD_VecAxis(currentCamera, c)) / 4;
+        CTR_WriteU32LE(&view->t[r], (u32)(s32)(translation >> 12));
+        g_nativeGteTranslationFraction[r] = (int)(translation & 0xfff);
+    }
+}
 static u32 s_hdOTBackup[0x406];
 int g_nativeHDIntermediate;
 int g_nativeHDEnableInterpolation = 1;
@@ -234,6 +273,7 @@ void NativeHD_RenderIntermediate(struct GameTracker *gGT)
     struct Instance *inst;
     struct PushBuffer savedCamera;
     struct DB savedDB;
+    MATRIX previousView, currentView;
     SVec3 currentPosition, currentRotation;
     int count, i, j, canInterpolate;
     u32 *ot, rootChain;
@@ -299,6 +339,12 @@ void NativeHD_RenderIntermediate(struct GameTracker *gGT)
          * slot draws after it, as on authored frames. */
         rootChain = ot[0];
         ClearOTagR(ot, 6);
+        /* The push buffer still holds the last frame's view: the frame's own
+         * render builds this update's later (RainLogic). Build it now, from
+         * this update's camera, to average the two. */
+        previousView = savedCamera.matrix_ViewProj;
+        PushBuffer_UpdateFrustum(&gGT->pushBuffer[0]);
+        currentView = gGT->pushBuffer[0].matrix_ViewProj;
         /* Append after any packets created earlier in MainMain. Rewinding
          * their bytes would corrupt the restored OT (notably demo text). */
         for (i = 0; i < 3; i++)
@@ -332,7 +378,9 @@ void NativeHD_RenderIntermediate(struct GameTracker *gGT)
                     if (continuous) NativeHD_InterpolateMatrix(&s_hdCurrent[i].instance->matrix, &s_hdPrevious[j].matrix, &s_hdCurrent[i].matrix);
             }
         }
+        /* The frustum from the midpoint camera culls; the view draws. */
         PushBuffer_UpdateFrustum(&gGT->pushBuffer[0]);
+        NativeHD_AverageView(&gGT->pushBuffer[0].matrix_ViewProj, &previousView, &currentView, &s_hdCameraPosition, &currentPosition);
         MainFrame_VisMemFullFrame(gGT, level);
         /* Texture selection is an idempotent function of the current timer;
          * use the same selected frames in both renders of this update. */
@@ -375,6 +423,7 @@ void NativeHD_RenderIntermediate(struct GameTracker *gGT)
             ot[0] = rootChain;
             DrawOTag(ot);
         }
+        memset(g_nativeGteTranslationFraction, 0, sizeof(g_nativeGteTranslationFraction));
         /* Consume only the first of the retail frame's two VBlanks. The
          * regular RenderVSYNC handles the remainder before the current pose. */
         Platform_WatchStage("midpoint-present");

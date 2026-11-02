@@ -39,6 +39,13 @@ global_variable int m_sf;
 global_variable s64 m_mac0;
 global_variable s64 m_mac3;
 
+/* Below a world unit of TR, in TR << 12 units, added in the perspective
+ * transforms: the in-between frames' view is the average of two (MainHD.c),
+ * half a unit off whole when the sum of their translations is odd. Only
+ * there, not in MVMVA, so a point taken to view space first and projected
+ * after gets it once. 0 elsewhere. */
+int g_nativeGteTranslationFraction[3];
+
 u32 gte_leadingzerocount(u32 lzcs)
 {
 	u32 lzcr = ((s32)lzcs < 0) ? ~lzcs : lzcs;
@@ -301,9 +308,9 @@ internal int Lm_H(s64 value, int sf)
 
 internal int GTE_RotTransPers(int idx, int lm)
 {
-	C2_MAC1 = A1(/*int44*/ (s64)((s64)C2_TRX << 12) + (C2_R11 * VX(idx)) + (C2_R12 * VY(idx)) + (C2_R13 * VZ(idx)));
-	C2_MAC2 = A2(/*int44*/ (s64)((s64)C2_TRY << 12) + (C2_R21 * VX(idx)) + (C2_R22 * VY(idx)) + (C2_R23 * VZ(idx)));
-	C2_MAC3 = A3(/*int44*/ (s64)((s64)C2_TRZ << 12) + (C2_R31 * VX(idx)) + (C2_R32 * VY(idx)) + (C2_R33 * VZ(idx)));
+	C2_MAC1 = A1(/*int44*/ (s64)((s64)C2_TRX << 12) + g_nativeGteTranslationFraction[0] + (C2_R11 * VX(idx)) + (C2_R12 * VY(idx)) + (C2_R13 * VZ(idx)));
+	C2_MAC2 = A2(/*int44*/ (s64)((s64)C2_TRY << 12) + g_nativeGteTranslationFraction[1] + (C2_R21 * VX(idx)) + (C2_R22 * VY(idx)) + (C2_R23 * VZ(idx)));
+	C2_MAC3 = A3(/*int44*/ (s64)((s64)C2_TRZ << 12) + g_nativeGteTranslationFraction[2] + (C2_R31 * VX(idx)) + (C2_R32 * VY(idx)) + (C2_R33 * VZ(idx)));
 	C2_IR1 = Lm_B1(C2_MAC1, lm);
 	C2_IR2 = Lm_B2(C2_MAC2, lm);
 	C2_IR3 = Lm_B3_sf(m_mac3, m_sf, lm);

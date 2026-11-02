@@ -27,6 +27,7 @@ python3 "$ROOT/tools/xsdk/test_background_fill.py" --vulkan "$VULKAN4XENON" --ou
 python3 "$ROOT/tools/xsdk/test_matrix_bake.py" --out "$OUT/matrix-tests"
 python3 "$ROOT/tools/xsdk/test_midpoint_spin.py" --out "$OUT/spin-tests"
 python3 "$ROOT/tools/xsdk/test_midpoint_effects.py" --out "$OUT/effect-tests"
+python3 "$ROOT/tools/xsdk/test_midpoint_view.py" --out "$OUT/view-tests"
 python3 "$ROOT/tools/xsdk/test_split_hud.py" --out "$OUT/split-hud-tests"
 python3 "$ROOT/tools/xsdk/test_pause_background.py" --out "$OUT/pause-tests"
 python3 "$ROOT/tools/xsdk/test_config_default.py" --out "$OUT/config-tests"

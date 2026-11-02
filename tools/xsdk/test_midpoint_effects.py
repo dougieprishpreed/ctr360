@@ -5,7 +5,9 @@ model as well as the instance found no previous pose for them, so midpoints drew
 the flames at the update's end, half a frame ahead of the kart: at speed they
 showed twice and too high. Threaded instances now match on their thread; a pooled
 instance reused for a new object has a new thread, and threadless level
-instances still need their model.
+instances still need their model. An object the last update did not have (a new
+boost's flames) is left out of the midpoint: the original first shows it at its
+own update's frame, and at that pose it stood half a frame ahead of the kart.
 """
 import argparse,re,subprocess
 from pathlib import Path
@@ -19,7 +21,9 @@ def block(source,start):
  return source[begin:end]
 pose=block(hd,'struct NativeHDPose')+';\n'
 defines=''.join(re.findall(r'#define NATIVE_HD_(?:INSTANCE_LIMIT|POSE_HASH_SIZE) \d+\n',hd))
-matcher=block(hd,'static void NativeHD_IndexPreviousPoses(')+'\n'+block(hd,'static int NativeHD_FindPreviousPose(')+'\n'
+matcher=block(hd,'static void NativeHD_IndexPreviousPoses(')+'\n'+block(hd,'static int NativeHD_FindPreviousPose(')+'\n'+block(hd,'static int NativeHD_IsNewObject(')+'\n'
+loop=hd[hd.index('j = NativeHD_FindPreviousPose('):hd.index('/* The frustum from the midpoint camera culls')]
+assert re.search(r'else if \(NativeHD_IsNewObject\(s_hdCurrent\[i\]\.instance, s_hdCurrent\[i\]\.thread\)\)\s*\{\s*s_hdCurrent\[i\]\.instance->flags \|= HIDE_MODEL;',loop),'new objects not left out of the midpoint'
 assert defines.count('#define')==2
 c=r'''
 #include <assert.h>
@@ -35,9 +39,9 @@ static struct NativeHDPose s_hdPrevious[NATIVE_HD_INSTANCE_LIMIT];
 static int s_hdPoseCount;
 static u16 s_hdPoseHash[NATIVE_HD_POSE_HASH_SIZE];
 @@MATCHER@@
-static struct Instance flame1,flame2,pickup,tree;
+static struct Instance flame1,flame2,pickup,tree,newFlame;
 static struct Model turbo[8],box,fruit,treeModel,treeStump;
-static struct Thread turboThread,oldPickup,newPickup;
+static struct Thread turboThread,oldPickup,newPickup,newTurbo;
 static void Previous(int i,struct Instance *inst,struct Model *model,struct Thread *thread)
 {s_hdPrevious[i].instance=inst;s_hdPrevious[i].model=model;s_hdPrevious[i].thread=thread;}
 int main(void){
@@ -54,7 +58,12 @@ int main(void){
  /* Level instances have no thread: their model has to match. */
  assert(NativeHD_FindPreviousPose(&tree,&treeModel,NULL)==3);
  assert(NativeHD_FindPreviousPose(&tree,&treeStump,NULL)<0);
- puts("PASS: actual matcher keeps the turbo flames' previous poses across model changes, not a reused instance's, and level instances by model");
+ /* Which objects are new: a new boost's flames and the reused pickup are; the same
+  * flames and the tree with another model are not. */
+ assert(!NativeHD_IsNewObject(&flame1,&turboThread) && !NativeHD_IsNewObject(&flame2,&turboThread));
+ assert(NativeHD_IsNewObject(&newFlame,&newTurbo) && NativeHD_IsNewObject(&pickup,&newPickup));
+ assert(!NativeHD_IsNewObject(&tree,NULL));
+ puts("PASS: actual matcher keeps the turbo flames' previous poses across model changes, not a reused instance's, and level instances by model; a new boost's flames are left out of the midpoint");
  return 0;
 }
 '''

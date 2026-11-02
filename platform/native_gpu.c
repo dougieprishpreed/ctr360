@@ -389,24 +389,6 @@ void MakeLineArray(GrVertex *vertex, VERTTYPE *p0, VERTTYPE *p1)
 	} // TODO diagonal line alignment
 }
 
-#if defined(_XBOX)
-int NativeGte_SubpixelOffset(s16 x, s16 y, s8 *dx, s8 *dy);
-
-/* [graphics] subpixel (native_gte_core.c): a world polygon's vertex takes the
- * exact place its projection had, in the lanes the shader adds (1/64 pixel).
- * The UI pass, off-screen draws and sprites keep their whole pixels. */
-static void NativeGpu_SubpixelVertex(GrVertex *vertex, const VERTTYPE *p)
-{
-	s8 dx, dy;
-
-	if ((s_nativeUIPass == 0) && activeDrawEnv.dfe && NativeGte_SubpixelOffset(p[0], p[1], &dx, &dy))
-	{
-		vertex->_p0 = dx;
-		vertex->_p1 = dy;
-	}
-}
-#endif
-
 void MakeVertexTriangle(GrVertex *vertex, VERTTYPE *p0, VERTTYPE *p1, VERTTYPE *p2)
 {
 	assert(p0);
@@ -426,11 +408,6 @@ void MakeVertexTriangle(GrVertex *vertex, VERTTYPE *p0, VERTTYPE *p1, VERTTYPE *
 
 	vertex[2].x = p2[0] + ofsX;
 	vertex[2].y = p2[1] + ofsY;
-#if defined(_XBOX)
-	NativeGpu_SubpixelVertex(&vertex[0], p0);
-	NativeGpu_SubpixelVertex(&vertex[1], p1);
-	NativeGpu_SubpixelVertex(&vertex[2], p2);
-#endif
 }
 
 void MakeVertexQuad(GrVertex *vertex, VERTTYPE *p0, VERTTYPE *p1, VERTTYPE *p2, VERTTYPE *p3)
@@ -456,12 +433,6 @@ void MakeVertexQuad(GrVertex *vertex, VERTTYPE *p0, VERTTYPE *p1, VERTTYPE *p2, 
 
 	vertex[3].x = p3[0] + ofsX;
 	vertex[3].y = p3[1] + ofsY;
-#if defined(_XBOX)
-	NativeGpu_SubpixelVertex(&vertex[0], p0);
-	NativeGpu_SubpixelVertex(&vertex[1], p1);
-	NativeGpu_SubpixelVertex(&vertex[2], p2);
-	NativeGpu_SubpixelVertex(&vertex[3], p3);
-#endif
 }
 
 void MakeVertexRect(GrVertex *vertex, VERTTYPE *p0, s16 w, s16 h)

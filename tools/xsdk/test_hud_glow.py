@@ -33,6 +33,7 @@ struct Icon {int identity;};struct PrimMem {void *cursor,*guardEnd;};
 struct PushBuffer {RECT rect;u32 *ptrOT;};
 struct DB {DRAWENV drawEnv;struct PrimMem primMem;};
 struct GameTracker {struct Icon *ptrIcons[64];struct DB *backBuffer;struct PushBuffer pushBuffer[4],pushBuffer_UI;};
+static int NativeHD_IsMenuWindow(const struct PushBuffer *pb){(void)pb;return 0;}
 struct Driver {int driverID;struct {int juicedUpCooldown;} BattleHUD;};
 static struct {struct GameTracker *gGT;int wumpaShineTheta;} state,*sdata=&state;
 #define CTR_ReadU32LE(p) (*(const u32 *)(p))

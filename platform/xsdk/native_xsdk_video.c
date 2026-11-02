@@ -50,7 +50,7 @@ static struct {
     unsigned vertexCursor,vertexBase,vertexCount,uniformCursor,uniformAlignment;
     const GrVertex *sourceVertices;
     XvTarget *target;int recording,inPass;
-    XvUniform state;VkRect2D scissor;int clipEnabled,ui,offscreen,drawPrim;
+    XvUniform state;VkRect2D scissor;int clipEnabled,ui,squeezed,offscreen,drawPrim;
     RECT16 offRect;BlendMode blend;TexFormat format;TextureID texture;
     int mainValid,mainResolved,vramCPUChanged,vramGPUChanged;
     u16 pixels[1024*512],move[1024*512];
@@ -616,7 +616,9 @@ void NativeRenderer_BeginScene(void)
 void NativeRenderer_EndScene(void) { XvEndPass(); }
 void NativeRenderer_EndGpuFrame(void) {}
 void NativeRenderer_FinishGpuMeasurements(void) {}
-void NativeRenderer_SetUIPass(int enabled) { xv.ui=enabled!=0; }
+/* 1 the authored UI, squeezed to 4:3 in widescreen and drawn unfiltered; 2 a
+ * menu window's world view, squeezed with its frame but filtered (native_gpu.c). */
+void NativeRenderer_SetUIPass(int pass) { xv.ui=pass==1;xv.squeezed=pass!=0; }
 void NativeRenderer_SetProjection(const RECT16 *draw,const DISPENV *display,int offscreen)
 {
     xv.state.rect[2]=(float)(offscreen?draw->w:display->disp.w);
@@ -629,8 +631,9 @@ void NativeRenderer_SetupClipMode(const RECT16 *clip,const DISPENV *display,int 
     if(!xv.clipEnabled)return;
     /* Clip rects are viewports or the whole screen, which only 4:3 squeezes.
      * Widescreen HUD art keeps to its player's 16:9 viewport, where the
-     * 3/4-player layout anchors its outer elements. */
-    float sx=xvSqueeze;
+     * 3/4-player layout anchors its outer elements. A menu window is drawn
+     * squeezed, and its clip with it. */
+    float sx=xv.squeezed && !xv.ui && g_nativeHDWidescreen?0.75f:xvSqueeze;
     float dw=display->disp.w>0?display->disp.w:1,dh=display->disp.h>0?display->disp.h:1;
     int left=(int)((((clip->x-display->disp.x)/dw-0.5f)*sx+0.5f)*XV_WIDTH);
     int top=(int)((clip->y-display->disp.y)/dh*XV_HEIGHT);
@@ -683,7 +686,7 @@ static void XvDrawTriangles(int first,int triangles,int filtering)
     if(!xv.offscreen)clip=xv.clipEnabled?xv.scissor:xvPicture;
     vkCmdSetViewport(xv.command,0,1,&viewport);vkCmdSetScissor(xv.command,0,1,&clip);
     /* Widescreen squeezes the authored 4:3 HUD to the middle; 4:3 squeezes everything. */
-    xv.state.scale[0]=xv.offscreen?1.0f:xv.ui && g_nativeHDWidescreen?0.75f:xvSqueeze;xv.state.scale[1]=xv.state.rect[2]*0.5f;
+    xv.state.scale[0]=xv.offscreen?1.0f:xv.squeezed && g_nativeHDWidescreen?0.75f:xvSqueeze;xv.state.scale[1]=xv.state.rect[2]*0.5f;
     xv.state.scale[2]=xv.offscreen?1.0f:0.0f;xv.state.scale[3]=(float)xv.format;
     xv.state.flags[3]=filtering;
     if(g_dbg_texturelessMode)xv.state.scale[3]=3;
@@ -1058,7 +1061,7 @@ static void XvMeshCheck(void)
         gridX[row*(COLUMNS+1)+col]=(s16)(40+col*6+(jitter?(int)(seed>>30)%3-1:0));
         gridY[row*(COLUMNS+1)+col]=(s16)(20+row*4+(jitter?(int)((seed>>27)&3)%3-1:0));
     }
-    xv.offscreen=0;xv.drawPrim=1;xv.clipEnabled=0;xv.ui=0;
+    xv.offscreen=0;xv.drawPrim=1;xv.clipEnabled=0;xv.ui=0;xv.squeezed=0;
     xv.state.rect[2]=512;xv.state.rect[3]=216;memset(xv.state.flags,0,sizeof(xv.state.flags));
     for(unsigned check=40;check<46;check++){
         unsigned flat=check==40,filtering=check==42 || check>=44,base=check>=43?64:0,fringe=check==45;

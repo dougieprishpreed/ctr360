@@ -1194,12 +1194,29 @@ void WindowBoxLines(struct GameTracker *gGT)
 	}
 }
 
+#ifdef _XBOX
+extern int g_nativeHDWidescreen;
+#endif
+
 void WindowDivsionLines(struct GameTracker *gGT)
 {
 	POLY_F4 *p;
 	int numPlyrCurrGame;
 
 	numPlyrCurrGame = gGT->numPlyrCurrGame;
+
+#ifdef _XBOX
+	// NOTE: Widescreen squeezes the UI pass to the middle 4:3, where these
+	// bars and the empty 3-player corner fell short of the screen's sides and
+	// the clear colour showed past them. They draw full width instead: the
+	// UI environment again after them (linked first, so drawn last), and a
+	// full-width one before them (linked last, so drawn first).
+	int fullWidth = g_nativeHDWidescreen && numPlyrCurrGame > 1;
+	if (fullWidth)
+	{
+		PushBuffer_SetDrawEnv_Pass(&gGT->pushBuffer_UI.ptrOT[3], &gGT->pushBuffer_UI, gGT->backBuffer, 1);
+	}
+#endif
 
 	// horizontal bar
 	if (numPlyrCurrGame > 1)
@@ -1302,6 +1319,13 @@ void WindowDivsionLines(struct GameTracker *gGT)
 		// backBuffer->primMem.cursor
 		gGT->backBuffer->primMem.cursor = (void *)(p + 1);
 	}
+
+#ifdef _XBOX
+	if (fullWidth)
+	{
+		PushBuffer_SetDrawEnv_Pass(&gGT->pushBuffer_UI.ptrOT[3], &gGT->pushBuffer_UI, gGT->backBuffer, 0);
+	}
+#endif
 }
 
 void RenderDispEnv_UI(struct GameTracker *gGT)

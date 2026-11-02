@@ -55,7 +55,7 @@ typedef struct {bool compressed;} V4xFormat;
 static const V4xFormat *v4x_format(unsigned format){static const V4xFormat rgba8={false};(void)format;return &rgba8;}
 static struct {
  VkDevice device;VkCommandBuffer command;XvBuffer staging;XvTarget main,off,vram;
- RECT16 offRect;int offscreen,drawPrim,vramCPUChanged,vramGPUChanged,mainValid,mainResolved,clipEnabled,ui;
+ RECT16 offRect;int offscreen,drawPrim,vramCPUChanged,vramGPUChanged,mainValid,mainResolved,clipEnabled,ui,squeezed;
  unsigned format,texture,vertexCursor,vertexCount;BlendMode blend;
  struct {float rect[4],scale[4],flags[4],source[4];} state;u16 pixels[1024*512];
 } xv;

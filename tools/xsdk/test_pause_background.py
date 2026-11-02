@@ -32,6 +32,7 @@ struct PrimMem {void *cursor,*guardEnd,*end;};
 struct PushBuffer {RECT rect;u32 *ptrOT;};
 struct DB {DRAWENV drawEnv;struct PrimMem primMem;};
 struct GameTracker {struct DB db[2],*backBuffer;struct PushBuffer pushBuffer_UI;u32 renderFlags,hudFlags;};
+static int NativeHD_IsMenuWindow(const struct PushBuffer *pb){(void)pb;return 0;}
 static struct {struct GameTracker *gGT;int pause_state;char *PausePtrsVRAM[6];} state,*sdata=&state;
 enum {RENDER_FLAG_CHECKERED_FLAG=0x1000,RENDER_FLAG_RENDER_BUCKET=0x20,HUD_FLAG_PAUSE_SCREENSHOT_MASK=0xfe,TEXPAGE_COLOR_4BIT=0,TRANS_50=0};
 #define CTR_ReadU32LE(p) (*(const u32 *)(p))

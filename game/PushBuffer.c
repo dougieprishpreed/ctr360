@@ -2,6 +2,7 @@
 
 #ifdef _XBOX
 extern int g_nativeHDWidescreen;
+int NativeHD_IsMenuWindow(const struct PushBuffer *pb);
 #endif
 
 
@@ -269,12 +270,15 @@ void PushBuffer_SetDrawEnv_Normal(void *ot, struct PushBuffer *pb, struct DB *ba
 
 		SetDrawEnv(p, &newDrawEnv);
 #ifdef _XBOX
-        /* Reserved E5 payload bit: identify the authored 4:3 UI pass without
-         * changing PSX packet size or its signed 11-bit drawing offsets. */
-        if (pb == &sdata->gGT->pushBuffer_UI)
+        /* Reserved E5 payload bits: identify the authored 4:3 UI pass (bit 23)
+         * and a menu window's world view, squeezed with it but drawn as world
+         * (bit 22), without changing PSX packet size or its signed 11-bit
+         * drawing offsets. */
+        if (pb == &sdata->gGT->pushBuffer_UI || NativeHD_IsMenuWindow(pb))
         {
             DR_ENV *envPacket = (DR_ENV *)p;
-            CtrGpu_WriteControlWord(&envPacket->code[2], CTR_ReadU32LE(&envPacket->code[2]) | 0x00800000u);
+            CtrGpu_WriteControlWord(&envPacket->code[2], CTR_ReadU32LE(&envPacket->code[2]) |
+                                                             (pb == &sdata->gGT->pushBuffer_UI ? 0x00800000u : 0x00400000u));
         }
 #endif
 
@@ -437,7 +441,7 @@ void PushBuffer_SetMatrixVP(struct PushBuffer *pb)
 #ifdef _XBOX
     /* Preserve vertical FOV and reveal 4/3 as much horizontal geometry.
      * Runtime ViewProj is a mixed-layout object with LE rotation/translation. */
-    if (g_nativeHDWidescreen && pb != &sdata->gGT->pushBuffer_UI)
+    if (g_nativeHDWidescreen && pb != &sdata->gGT->pushBuffer_UI && !NativeHD_IsMenuWindow(pb))
     {
         int wideAxis;
         s32 wideTranslation = (s32)CTR_ReadU32LE(&pb->matrix_ViewProj.t[0]);
@@ -634,7 +638,7 @@ void PushBuffer_UpdateFrustum(struct PushBuffer *pb)
 	val_X = val_X / 2;
 #ifdef _XBOX
     /* The CPU BSP/instance frustum must cover the expanded horizontal view. */
-    if (g_nativeHDWidescreen && pb != &sdata->gGT->pushBuffer_UI) val_X = val_X * 4 / 3;
+    if (g_nativeHDWidescreen && pb != &sdata->gGT->pushBuffer_UI && !NativeHD_IsMenuWindow(pb)) val_X = val_X * 4 / 3;
 #endif
 
 	val_Y = ((pb->rect.h * 0x600) / 0x360);

@@ -111,6 +111,16 @@ int g_nativeHDEnableInterpolation = 1;
  * HUD in a centred 4:3 area; 0 keeps the original 4:3 view. Boot-time only. */
 int g_nativeHDWidescreen = 1;
 
+/* Widescreen draws the world across the screen and squeezes the authored
+ * 4:3 UI to its middle. A world view in a menu's window (character and track
+ * selection) sits inside UI frames: it is squeezed with them and keeps its
+ * 4:3 projection (PushBuffer.c), else it spills past its frame. */
+int NativeHD_IsMenuWindow(const struct PushBuffer *pb)
+{
+    const struct GameTracker *gGT = sdata->gGT;
+    return g_nativeHDWidescreen && pb != &gGT->pushBuffer_UI && (gGT->gameMode1 & MAIN_MENU) != 0 && (s16)pb->rect.w < 0x200;
+}
+
 /* The HUD squeeze centres the authored 512-wide layout on the screen: PSX x
  * 0 lands 85 of its 1.875-pixel units in from the edge. */
 #define NATIVE_HD_SPLIT_HUD_MARGIN 85

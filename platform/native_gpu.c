@@ -26,6 +26,8 @@ void Platform_PollHostEvents(void);
 extern int g_cfg_bilinearFiltering;
 #ifdef _XBOX
 void NativeRenderer_SetUIPass(int enabled);
+/* The pass a DR_OFFSET marks (PushBuffer_SetDrawEnv_Normal): 1 the authored
+ * 4:3 UI, 2 a menu window's world view squeezed with it, 0 the world. */
 static int s_nativeUIPass;
 #endif
 extern int g_dbg_emulatorPaused;
@@ -169,7 +171,7 @@ int NativeGpu_HasHUDCapture(void)
 static void NativeGpu_CaptureHUD(const GPUDrawSplit *split, const GrVertex *vertices)
 {
     GPUDrawSplit *cached;
-    if (!s_hdHUDCaptureEnabled || !s_hdHUDValid || !split->uiPass || !split->drawenv.dfe || split->numVerts == 0) return;
+    if (!s_hdHUDCaptureEnabled || !s_hdHUDValid || split->uiPass != 1 || !split->drawenv.dfe || split->numVerts == 0) return;
     if (s_hdHUDSplitCount >= NATIVE_HD_HUD_SPLITS || s_hdHUDVertexCount + split->numVerts > NATIVE_HD_HUD_VERTICES)
     {
         s_hdHUDValid = 0;
@@ -989,7 +991,7 @@ void DrawSplit(const GPUDrawSplit *split)
 
 	const bool drawOnScreen = split->drawenv.dfe;
 #ifdef _XBOX
-    NativeRenderer_SetUIPass(drawOnScreen && split->uiPass);
+    NativeRenderer_SetUIPass(drawOnScreen ? split->uiPass : 0);
 #endif
 	if ((split->drawenv.clip.w <= 0) || (split->drawenv.clip.h <= 0))
 	{
@@ -1990,7 +1992,7 @@ internal int ProcessDrawEnv(P_TAG *polyTag)
 		{
 			// DR_OFFSET
 #ifdef _XBOX
-            s_nativeUIPass = (code & 0x00800000u) != 0;
+            s_nativeUIPass = (code & 0x00800000u) ? 1 : (code & 0x00400000u) ? 2 : 0;
 #endif
 			activeDrawEnv.ofs[0] = NativeGpu_SignExtend11(code);
 			activeDrawEnv.ofs[1] = NativeGpu_SignExtend11(code >> 11);
@@ -2047,7 +2049,7 @@ internal void ProcessDrawEnvCommand(u32 code)
 		break;
 	case 0x5:
 #ifdef _XBOX
-        s_nativeUIPass = (code & 0x00800000u) != 0;
+        s_nativeUIPass = (code & 0x00800000u) ? 1 : (code & 0x00400000u) ? 2 : 0;
 #endif
 		activeDrawEnv.ofs[0] = NativeGpu_SignExtend11(code);
 		activeDrawEnv.ofs[1] = NativeGpu_SignExtend11(code >> 11);

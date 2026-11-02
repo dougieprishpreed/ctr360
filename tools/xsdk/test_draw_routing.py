@@ -39,7 +39,7 @@ typedef struct {int pass;} XvTarget;
 static struct {
  VkCommandBuffer command; XvTarget main,off,vram;
  struct {VkBuffer buffer;} vertices;
- unsigned vertexBase,vertexCount; int offscreen,ui,clipEnabled,drawPrim,mainValid;
+ unsigned vertexBase,vertexCount; int offscreen,ui,squeezed,clipEnabled,drawPrim,mainValid;
  RECT16 offRect; VkRect2D scissor; XvUniform state;
  TextureID texture; TexFormat format; BlendMode blend;
  const GrVertex *sourceVertices;u16 pixels[1024*512];
@@ -82,7 +82,7 @@ int main(void){
  xv.offRect=(RECT16){0,0,32,32};
  unsigned cases=0;
  for(unsigned off=0;off<2;off++)for(unsigned ui=0;ui<2;ui++)for(unsigned mask=0;mask<2;mask++){
-  xv.offscreen=off;xv.ui=ui;xv.drawPrim=mask;
+  xv.offscreen=off;xv.ui=xv.squeezed=ui;xv.drawPrim=mask;
   for(unsigned fmt=0;fmt<4;fmt++)for(unsigned filter=0;filter<2;filter++){
    g_dbg_texturelessMode=0;
    check(NativeRenderer_GetWhiteTexture(),fmt,filter,6);cases++;
@@ -91,16 +91,16 @@ int main(void){
    check(NativeRenderer_GetVRAMTexture(),fmt,filter,6);cases++;
   }
  }
- g_dbg_texturelessMode=0;xv.offscreen=0;xv.ui=0;
+ g_dbg_texturelessMode=0;xv.offscreen=0;xv.ui=xv.squeezed=0;
  NativeRenderer_SetTexture(NativeRenderer_GetVRAMTexture(),TF_4_BIT);
  NativeRenderer_DrawTriangles(3,2);assert(selected==1);
- xv.ui=1;NativeRenderer_DrawTriangles(3,2);assert(selected==0);
- xv.ui=0;xv.offscreen=1;NativeRenderer_DrawTriangles(3,2);assert(selected==7);
+ xv.ui=xv.squeezed=1;NativeRenderer_DrawTriangles(3,2);assert(selected==0);
+ xv.ui=xv.squeezed=0;xv.offscreen=1;NativeRenderer_DrawTriangles(3,2);assert(selected==7);
  unsigned before=draws;
  XvDrawTriangles(-1,2,1);XvDrawTriangles(0,0,1);XvDrawTriangles(10,2,1);XvDrawTriangles(13,1,1);
  assert(draws==before);
  GrVertex vertices[6];for(unsigned i=0;i<6;i++)vertices[i].clut=511*64+63;
- xv.vertexCount=6;xv.sourceVertices=vertices;xv.offscreen=xv.ui=0;
+ xv.vertexCount=6;xv.sourceVertices=vertices;xv.offscreen=xv.ui=xv.squeezed=0;
  for(unsigned fmt=0;fmt<2;fmt++)for(unsigned kind=0;kind<4;kind++){
   xv.format=fmt;memset(xv.pixels,0,sizeof(xv.pixels));
   for(unsigned i=0;i<(fmt?256:16);i++)xv.pixels[511*1024+((1008+i)&1023)]=kind==0?31:kind==1?32768:kind==2?(i&1?31:32768):0;
@@ -127,14 +127,21 @@ int main(void){
  /* Widescreen squeezes the authored HUD into the middle 4:3; widescreen = 0 squeezes
   * everything into the 960-pixel picture on a wide output, nothing on a 4:3 one. */
  xv.state.flags[0]=0;xv.clipEnabled=0;xv.offscreen=0;
- xv.ui=1;XvDrawTriangles(0,2,0);assert(scaleSeen==0.75f && scissorSeen.offset.x==0 && scissorSeen.extent.width==XV_WIDTH);
- xv.ui=0;XvDrawTriangles(0,2,0);assert(scaleSeen==1);
+ xv.ui=xv.squeezed=1;XvDrawTriangles(0,2,0);assert(scaleSeen==0.75f && scissorSeen.offset.x==0 && scissorSeen.extent.width==XV_WIDTH);
+ xv.ui=xv.squeezed=0;XvDrawTriangles(0,2,0);assert(scaleSeen==1);
+ /* A menu window's world view (NativeRenderer_SetUIPass 2): squeezed with its UI frame and
+  * clipped to its squeezed rect, where the UI keeps its viewport's clip. */
+ {DISPENV wide={{0,0,512,216},0};RECT16 window={256,0,128,108};xv.ui=0;xv.squeezed=1;
+  XvDrawTriangles(0,2,0);assert(scaleSeen==0.75f);
+  NativeRenderer_SetupClipMode(&window,&wide,1);assert(xv.scissor.offset.x==640 && xv.scissor.extent.width==240);
+  xv.ui=1;NativeRenderer_SetupClipMode(&window,&wide,1);assert(xv.scissor.offset.x==640 && xv.scissor.extent.width==320);
+  xv.ui=xv.squeezed=0;xv.clipEnabled=0;}
  g_nativeHDWidescreen=0;xvSqueeze=0.75f;xvPicture=(VkRect2D){{160,0},{960,XV_HEIGHT}};
- xv.ui=1;XvDrawTriangles(0,2,0);assert(scaleSeen==0.75f && scissorSeen.offset.x==160 && scissorSeen.extent.width==960);
- xv.ui=0;XvDrawTriangles(0,2,0);assert(scaleSeen==0.75f && scissorSeen.offset.x==160 && scissorSeen.extent.width==960);
+ xv.ui=xv.squeezed=1;XvDrawTriangles(0,2,0);assert(scaleSeen==0.75f && scissorSeen.offset.x==160 && scissorSeen.extent.width==960);
+ xv.ui=xv.squeezed=0;XvDrawTriangles(0,2,0);assert(scaleSeen==0.75f && scissorSeen.offset.x==160 && scissorSeen.extent.width==960);
  xv.offscreen=1;XvDrawTriangles(0,2,0);assert(scaleSeen==1 && scissorSeen.offset.x==0 && scissorSeen.extent.width==32);xv.offscreen=0;
  xvSqueeze=1;xvPicture=(VkRect2D){{0,0},{XV_WIDTH,XV_HEIGHT}};
- xv.ui=1;XvDrawTriangles(0,2,0);assert(scaleSeen==1 && scissorSeen.extent.width==XV_WIDTH);
+ xv.ui=xv.squeezed=1;XvDrawTriangles(0,2,0);assert(scaleSeen==1 && scissorSeen.extent.width==XV_WIDTH);
  /* A 3/4-player viewport clips widescreen HUD art to its own 16:9 quarter, where the
   * outer elements now sit; 4:3 clips to that quarter of the picture. */
  DISPENV display={{0,0,512,216},0};RECT16 quarter={0,0,253,106};
@@ -170,7 +177,7 @@ int main(void){
     negative = run(harness.replace(invalidation,'(void)0;'), 'palette-invalidation-negative')
     assert negative.returncode, 'negative control missed stale GPU-written palette'
     print('PASS: using stale CPU palettes after a GPU write rejected')
-    squeezedClip = 'float sx=xvSqueeze;'
+    squeezedClip = 'float sx=xv.squeezed && !xv.ui && g_nativeHDWidescreen?0.75f:xvSqueeze;'
     assert squeezedClip in harness
     negative = run(harness.replace(squeezedClip, 'float sx=xv.ui?0.75f:1.0f;'), 'viewport-clip-negative')
     assert negative.returncode, 'negative control missed HUD clips squeezed into the 4:3 middle'

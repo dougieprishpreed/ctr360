@@ -9,6 +9,10 @@ enum Ovr227DrawLevelConstants
 	OVR227_TEXTURE_LOD_DEPTH_THRESHOLD1 = 0x800,
 	OVR227_TOP_LEVEL_NEAR_DEPTH_THRESHOLD = 0x600,
 	OVR227_RECURSIVE_NEAR_DEPTH_THRESHOLD = 0x300,
+	// Far blocks fade their split vertices towards the far colour beyond this
+	// depth: the render lists' 2P far threshold (0x1540) plus 0x140, as 1P
+	// derives it (MainFrame_RenderFrame), baked as -5760 in retail 227.
+	OVR227_FULL_DYNAMIC_FADE_DEPTH_START = 0x1680,
 };
 
 static void DrawLevelOvr2P_CopyClipRecordJumpTable(void);
@@ -110,6 +114,11 @@ static void DrawLevelOvr2P_SeedSharedHelperThresholdScratch(void)
 	DrawLevelOvr1P_RenderScratch()->textureLodDepthThreshold1 = OVR227_TEXTURE_LOD_DEPTH_THRESHOLD1;
 	DrawLevelOvr1P_RenderScratch()->topLevelNearDepthThreshold = OVR227_TOP_LEVEL_NEAR_DEPTH_THRESHOLD;
 	DrawLevelOvr1P_RenderScratch()->recursiveNearDepthThreshold = OVR227_RECURSIVE_NEAR_DEPTH_THRESHOLD;
+	// Only the 1P frame setup writes this one. Unseeded, far blocks faded
+	// against a stale depth: their split vertices took the darker far colour
+	// and folded in, a dark checker that stayed until the camera moved on;
+	// retail shows it for a frame as blocks cross into the far list.
+	DrawLevelOvr1P_RenderScratch()->fullDynamicFadeDepthStart = OVR227_FULL_DYNAMIC_FADE_DEPTH_START;
 }
 
 static const struct DrawLevelOvr1PBucket *DrawLevelOvr2P_FindBucketByHandler(u32 handlerAddress)

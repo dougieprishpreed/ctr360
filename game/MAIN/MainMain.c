@@ -432,7 +432,9 @@ u32 main(void)
 #if defined(CTR_INTERNAL) && !defined(_XBOX)
 			// Test aid, CTR_TEST_LEVEL=<id> [CTR_TEST_MODE1/2=<hex>]: once the
 			// main menu is idle, load that level with those mode flags (e.g. 42
-			// with 60080000 runs the ending into the credits).
+			// with 60080000 runs the ending into the credits). CTR_TEST_PLAYERS=<n>
+			// loads it for that many players (mode 0 is then a VS race, no bots);
+			// CTR_TEST_WEAPON=<item id> hands player 1 that item once the race is on.
 			{
 				static int s_testJumped;
 				const char *testLevel = getenv("CTR_TEST_LEVEL");
@@ -447,7 +449,16 @@ u32 main(void)
 					sdata->ptrActiveMenu = NULL;
 					if (mode1 != NULL) gGT->gameMode1 = (u32)strtoul(mode1, NULL, 16);
 					if (mode2 != NULL) gGT->gameMode2 = (u32)strtoul(mode2, NULL, 16);
+					if (getenv("CTR_TEST_PLAYERS") != NULL) gGT->numPlyrNextGame = (u8)atoi(getenv("CTR_TEST_PLAYERS"));
 					MainRaceTrack_RequestLoad((s16)atoi(testLevel));
+				}
+				if (s_testJumped && (getenv("CTR_TEST_WEAPON") != NULL) && (gGT->levelID != MAIN_MENU_LEVEL) &&
+				    (sdata->Loading.stage == LOAD_IDLE) && (gGT->drivers[0] != NULL) && (gGT->trafficLightsTimer <= 0) &&
+				    (gGT->drivers[0]->heldItemID == HELD_ITEM_NONE))
+				{
+					gGT->drivers[0]->heldItemID = (DriverHeldItem)atoi(getenv("CTR_TEST_WEAPON"));
+					gGT->drivers[0]->numHeldItems = 1;
+					gGT->drivers[0]->itemRollTimer = 0;
 				}
 			}
 #endif

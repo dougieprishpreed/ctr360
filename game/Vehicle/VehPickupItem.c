@@ -870,12 +870,15 @@ void VehPickupItem_ShootNow(struct Driver *d, s32 weaponID, s32 flags)
 		{
 			struct Driver *victim;
 
-			GAME_TRACKER->drivers[i]->clockFlash = CLOCK_FLASH_FRAMES;
 			victim = GAME_TRACKER->drivers[i];
 			if (victim == 0)
 			{
 				continue;
 			}
+			// Retail flashes the slot before its null check; an empty slot
+			// (every one past the players in VS) wrote PS1 low RAM. Native
+			// faulted there, so the flash waits for a driver.
+			victim->clockFlash = CLOCK_FLASH_FRAMES;
 			if (victim != d)
 			{
 				if (RB_Hazard_HurtDriver(victim, CLOCK_HURT_REASON, 0, 0) != 0)

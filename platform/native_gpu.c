@@ -401,16 +401,33 @@ void MakeLineArray(GrVertex *vertex, VERTTYPE *p0, VERTTYPE *p1)
  * RenderAllLevelGeometry) is grown by half a PlayStation pixel along every
  * edge, in the lanes the shader adds (1/64 pixel): neighbours overlap and
  * gaps up to a pixel close. Translucent ones (water), objects, the UI and
- * off-screen draws keep their edges. */
+ * off-screen draws keep their edges, and so do small ones (distant track):
+ * their cracks are under a pixel, and growing them stretches their texture
+ * most. The first version cost the console about a millisecond a frame
+ * (square roots, divisions and floorf at every corner, each conversion a
+ * round trip through memory); this one tests the area in integers and needs
+ * one square root an edge and one division a corner. */
 int g_nativeCloseSeams = 1;
 const u8 *g_nativeLevelPrimStart;
 const u8 *g_nativeLevelPrimEnd;
 static bool s_gpuPolySemiTrans;
 #define NATIVE_GPU_SEAM_GROWTH 0.5f
+// Twice the area, in square PlayStation pixels, below which a polygon keeps
+// its corners: smaller than 8 by 8, a third of a race's track polygons.
+#define NATIVE_GPU_SEAM_MIN_AREA2 128
+// Corners further out than this (well off screen) keep the area in range.
+#define NATIVE_GPU_SEAM_COORD_LIMIT 4096
+
+static s8 NativeGpu_SeamLane(float offset)
+{
+	int lane = (int)(offset + ((offset >= 0.0f) ? 0.5f : -0.5f));
+	return (s8)((lane > 127) ? 127 : ((lane < -127) ? -127 : lane));
+}
 
 static void NativeGpu_CloseSeams(GrVertex *vertex, int count, const VERTTYPE *prim)
 {
-	float area = 0.0f, side;
+	int area2 = 0;
+	float x[4], y[4], nx[4], ny[4], side;
 
 	if (!g_nativeCloseSeams || (s_nativeUIPass != 0) || !activeDrawEnv.dfe || s_gpuPolySemiTrans ||
 	    ((const u8 *)prim < g_nativeLevelPrimStart) || ((const u8 *)prim >= g_nativeLevelPrimEnd))
@@ -420,50 +437,49 @@ static void NativeGpu_CloseSeams(GrVertex *vertex, int count, const VERTTYPE *pr
 
 	for (int i = 0; i < count; i++)
 	{
-		const GrVertex *a = &vertex[i], *c = &vertex[(i + 1) % count];
-		area += (float)a->x * c->y - (float)c->x * a->y;
+		const GrVertex *a = &vertex[i], *c = &vertex[(i + 1 == count) ? 0 : i + 1];
+		if ((unsigned)(a->x + NATIVE_GPU_SEAM_COORD_LIMIT) > 2u * NATIVE_GPU_SEAM_COORD_LIMIT ||
+		    (unsigned)(a->y + NATIVE_GPU_SEAM_COORD_LIMIT) > 2u * NATIVE_GPU_SEAM_COORD_LIMIT)
+		{
+			return;
+		}
+		area2 += a->x * c->y - c->x * a->y;
 	}
-	// Null polygons (the texture-page hack) and slivers keep their corners.
-	if (fabsf(area) < 1.0f)
+	// Null polygons (the texture-page hack), slivers and distant ones keep
+	// their corners.
+	if ((area2 > -NATIVE_GPU_SEAM_MIN_AREA2) && (area2 < NATIVE_GPU_SEAM_MIN_AREA2))
 	{
 		return;
 	}
-	side = (area > 0.0f) ? 1.0f : -1.0f;
+	side = (area2 > 0) ? 1.0f : -1.0f;
 
 	for (int i = 0; i < count; i++)
 	{
-		const GrVertex *prev = &vertex[(i + count - 1) % count], *at = &vertex[i], *next = &vertex[(i + 1) % count];
-		float ax = (float)(at->x - prev->x), ay = (float)(at->y - prev->y);
-		float bx = (float)(next->x - at->x), by = (float)(next->y - at->y);
-		float la = sqrtf(ax * ax + ay * ay), lb = sqrtf(bx * bx + by * by);
-		float nx, ny, mx, my, length, cosHalf, reach;
-
-		if ((la < 0.001f) || (lb < 0.001f))
-		{
-			continue;
-		}
-		// Outward normals of both edges; the corner moves along their
-		// bisector far enough to push each edge out by the growth (a 45-degree
-		// corner of a split quad too), at most four times that at a sliver's tip.
-		nx = side * ay / la;
-		ny = -side * ax / la;
-		mx = nx + side * by / lb;
-		my = ny - side * bx / lb;
-		length = sqrtf(mx * mx + my * my);
-		if (length < 0.001f)
-		{
-			continue;
-		}
-		mx /= length;
-		my /= length;
-		cosHalf = mx * nx + my * ny;
-		reach = NATIVE_GPU_SEAM_GROWTH / ((cosHalf > 0.25f) ? cosHalf : 0.25f) * 64.0f;
-		if (reach > 127.0f)
-		{
-			reach = 127.0f;
-		}
-		vertex[i]._p0 = (s8)floorf(mx * reach + 0.5f);
-		vertex[i]._p1 = (s8)floorf(my * reach + 0.5f);
+		x[i] = vertex[i].x;
+		y[i] = vertex[i].y;
+	}
+	// Edge i runs from corner i to the next; its outward unit normal. A
+	// repeated corner's empty edge has none, and its neighbours bevel it.
+	for (int i = 0; i < count; i++)
+	{
+		int next = (i + 1 == count) ? 0 : i + 1;
+		float ex = x[next] - x[i], ey = y[next] - y[i];
+		float length2 = ex * ex + ey * ey;
+		float scale = (length2 > 0.0f) ? side / sqrtf(length2) : 0.0f;
+		nx[i] = ey * scale;
+		ny[i] = -ex * scale;
+	}
+	// A corner moving by g (n0 + n1) / (1 + n0.n1) pushes both its edges out
+	// by g (a 45-degree corner of a split quad too). At a sliver's tip, where
+	// 1 + n0.n1 nears 0, the floor of 1/8 keeps the move under four times g.
+	for (int i = 0; i < count; i++)
+	{
+		int prev = (i == 0) ? count - 1 : i - 1;
+		float sx = nx[prev] + nx[i], sy = ny[prev] + ny[i];
+		float d = 1.0f + nx[prev] * nx[i] + ny[prev] * ny[i];
+		float reach = (NATIVE_GPU_SEAM_GROWTH * 64.0f) / ((d > 0.125f) ? d : 0.125f);
+		vertex[i]._p0 = NativeGpu_SeamLane(sx * reach);
+		vertex[i]._p1 = NativeGpu_SeamLane(sy * reach);
 	}
 }
 #endif

@@ -15,6 +15,7 @@ typedef int64_t s64;typedef uint16_t u16;
 #define VRAM_HEIGHT 512
 static struct {u16 pixels[1024*512];int vramCPUChanged;} xv;
 static void XvSyncCPU(void) {}
+static void XvDirty(int x,int y,int w,int h) {(void)x;(void)y;(void)w;(void)h;xv.vramCPUChanged=1;}
 """+body+r"""
 static u16 old[1024*512],expected[1024*512],external[100];
 static void check(int externalSource,int x,int y,int w,int h,int dx,int dy) {

@@ -14,7 +14,7 @@ c=r'''
 typedef struct {float rect[4],scale[4],flags[4],source[4];} XvUniform;
 typedef struct {VkImageView view;} XvTarget;
 static struct {VkDevice device;VkDescriptorPool descriptors;VkDescriptorSetLayout setLayout;
- VkDescriptorSet sets[4];VkSampler sampler,linearSampler,vramSampler;XvTarget vram,main,off;
+ VkDescriptorSet sets[5];VkSampler sampler,linearSampler,vramSampler;XvTarget vram,main,off,upload;
  struct {VkBuffer buffer;} uniforms;} xv;
 static VkSamplerCreateInfo samplers[4];static unsigned calls,sets,writes;
 #define XV_CALL(x) assert((x)==VK_SUCCESS)
@@ -22,22 +22,22 @@ VkResult vkCreateSampler(VkDevice d,const VkSamplerCreateInfo *info,const VkAllo
  assert(++calls<=3);samplers[calls]=*info;*p=(VkSampler)(uintptr_t)calls;return VK_SUCCESS;
 }
 VkResult vkAllocateDescriptorSets(VkDevice d,const VkDescriptorSetAllocateInfo *i,VkDescriptorSet *p){
- assert(sets<4);*p=(VkDescriptorSet)(uintptr_t)++sets;return VK_SUCCESS;
+ assert(sets<5);*p=(VkDescriptorSet)(uintptr_t)++sets;return VK_SUCCESS;
 }
 void vkUpdateDescriptorSets(VkDevice d,uint32_t n,const VkWriteDescriptorSet *w,uint32_t copies,const VkCopyDescriptorSet *c){
- assert(n==2 && writes<4);const VkDescriptorImageInfo *image=w[1].pImageInfo;
+ assert(n==2 && writes<5);const VkDescriptorImageInfo *image=w[1].pImageInfo;
  const VkSamplerCreateInfo *s=&samplers[(uintptr_t)image->sampler];
  assert(s->minFilter==(writes==3?VK_FILTER_LINEAR:VK_FILTER_NEAREST) && s->magFilter==s->minFilter);
  assert(s->addressModeU==(writes==0?VK_SAMPLER_ADDRESS_MODE_REPEAT:VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE));
  assert(s->addressModeV==s->addressModeU && s->addressModeW==VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
- VkImageView expected[]={xv.vram.view,xv.main.view,xv.off.view,xv.main.view};
+ VkImageView expected[]={xv.vram.view,xv.main.view,xv.off.view,xv.main.view,xv.upload.view};
  assert(image->imageView==expected[writes] && image->imageLayout==VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);writes++;
 }
 int main(void){
- xv.vram.view=(VkImageView)1;xv.main.view=(VkImageView)2;xv.off.view=(VkImageView)3;
+ xv.vram.view=(VkImageView)1;xv.main.view=(VkImageView)2;xv.off.view=(VkImageView)3;xv.upload.view=(VkImageView)4;
 '''+body+r'''
- assert(calls==3 && sets==4 && writes==4);
- puts("PASS: actual packed-VRAM nearest/repeat sampler; main/offscreen nearest/clamp and FXAA linear/clamp descriptors");
+ assert(calls==3 && sets==5 && writes==5);
+ puts("PASS: actual packed-VRAM nearest/repeat sampler; main/offscreen/upload nearest/clamp and FXAA linear/clamp descriptors");
 }
 '''
 def run(source,name):

@@ -8,6 +8,12 @@ enum
 	DECAL_HUD_TPAGE_TRANSPARENCY_MASK = 0xff9fffffu,
 };
 
+// A corner packs x in the low half and y in the high one. Retail positions
+// are never negative; the widescreen 3/4-player HUD moves the outer weapon
+// slots past x 0 (NativeHD_WidenSplitScreenHud), and an unmasked negative x
+// filled the y half with ones: every corner at y -1, the weapon never drawn.
+#define DECAL_HUD_X(x) ((u32)(x) & 0xffffu)
+
 
 void DecalHUD_DrawPolyFT4(struct Icon *icon, s32 posX, s32 posY, struct PrimMem *primMem, u32 *ot, u8 transparency, s16 scale)
 {
@@ -25,7 +31,7 @@ void DecalHUD_DrawPolyFT4(struct Icon *icon, s32 posX, s32 posY, struct PrimMem 
 	uvTopLeft = CTR_ReadU32LE(&icon->texLayout.u0);
 	width = (s32)(((uvTopRight & 0xff) - (uvTopLeft & 0xff)) * scale) >> 12;
 	height = (s32)((icon->texLayout.v2 - ((s32)uvTopLeft >> 8 & 0xff)) * scale) >> 12;
-	// NOTE(aalhendi): Retail leaves X unmasked, so its upper bits can spill into packed Y.
+	// Retail leaves X unmasked, so a negative one spilled into packed Y (DECAL_HUD_X).
 	posY = (u32)posY << 16;
 	uvBottomLeft = CTR_ReadU32LE(&icon->texLayout.u2);
 	p = (POLY_FT4 *)primMem->cursor;
@@ -47,10 +53,10 @@ void DecalHUD_DrawPolyFT4(struct Icon *icon, s32 posX, s32 posY, struct PrimMem 
 	CtrGpu_WritePackedUVWord(&p->u0, uvTopLeft);
 	CtrGpu_WritePackedUV(&p->u2, uvBottomLeft);
 	CtrGpu_WritePackedUV(&p->u3, CTR_ReadU16LE(&icon->texLayout.u3));
-	CtrGpu_WritePackedXY(&p->x0, posX | posY);
-	CtrGpu_WritePackedXY(&p->x1, ((u32)posX + width) | posY);
-	CtrGpu_WritePackedXY(&p->x2, posX | (posY + ((u32)height << 16)));
-	CtrGpu_WritePackedXY(&p->x3, ((u32)posX + width) | (posY + ((u32)height << 16)));
+	CtrGpu_WritePackedXY(&p->x0, DECAL_HUD_X(posX) | posY);
+	CtrGpu_WritePackedXY(&p->x1, DECAL_HUD_X((u32)posX + width) | posY);
+	CtrGpu_WritePackedXY(&p->x2, DECAL_HUD_X(posX) | (posY + ((u32)height << 16)));
+	CtrGpu_WritePackedXY(&p->x3, DECAL_HUD_X((u32)posX + width) | (posY + ((u32)height << 16)));
 
 	p->tag = *ot | 0x09000000;
 	*ot = CtrGpu_PrimToOTLink24(p);
@@ -99,11 +105,11 @@ void DecalHUD_DrawWeapon(struct Icon *icon, s32 posX, s32 posY, struct PrimMem *
 	// Rotate the corner assignment in quarter turns, swapping width and height for odd turns.
 	if (rot & 1)
 	{
-		right = (u32)posX + height;
+		right = DECAL_HUD_X((u32)posX + height);
 		bottom = posY + ((u32)width << 16);
-		topLeft = posX | posY;
+		topLeft = DECAL_HUD_X(posX) | posY;
 		topRight = right | posY;
-		bottomLeft = posX | bottom;
+		bottomLeft = DECAL_HUD_X(posX) | bottom;
 		bottomRight = right | bottom;
 		if (rot == 1)
 		{
@@ -122,11 +128,11 @@ void DecalHUD_DrawWeapon(struct Icon *icon, s32 posX, s32 posY, struct PrimMem *
 	}
 	else
 	{
-		right = (u32)posX + width;
+		right = DECAL_HUD_X((u32)posX + width);
 		bottom = posY + ((u32)height << 16);
-		topLeft = posX | posY;
+		topLeft = DECAL_HUD_X(posX) | posY;
 		topRight = right | posY;
-		bottomLeft = posX | bottom;
+		bottomLeft = DECAL_HUD_X(posX) | bottom;
 		bottomRight = right | bottom;
 		if (rot == 0)
 		{
@@ -194,8 +200,9 @@ void DecalHUD_DrawPolyGT4(struct Icon *icon, s32 posX, s32 inputY, struct PrimMe
 	CtrGpu_WritePackedUV(&p->u2, uv2);
 	CtrGpu_WritePackedUV(&p->u3, CTR_ReadU16LE(&icon->texLayout.u3));
 
-	// NOTE(aalhendi): Only the initial X is masked; the scaled right edge can carry into Y.
-	right = (u32)posX + width;
+	// Retail masks only the initial X, so a right edge past 0xffff carried into
+	// Y; no retail position gets there, and a widened negative one would.
+	right = DECAL_HUD_X((u32)posX + width);
 	bottom = posY + ((u32)height << 16);
 	xy0 = posX | posY;
 	xy1 = right | posY;

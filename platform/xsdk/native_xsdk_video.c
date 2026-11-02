@@ -5,6 +5,7 @@
  */
 #include <vulkan/vulkan.h>
 #include <vulkan4xenon.h>
+#include <xsdk/gpu.h>
 #include <xsdk/present.h>
 #include <platform/native_renderer.h>
 #include <platform/native_log.h>
@@ -40,19 +41,21 @@ CTR_STATIC_ASSERT(offsetof(XvVertex, uvMin) == 20);
 static struct {
     VkInstance instance;VkPhysicalDevice physical;VkDevice device;VkQueue queue;
     VkSurfaceKHR surface;VkSwapchainKHR swapchain;unsigned imageCount;
-    XvTarget swap[3],main,off,vram;
+    XvTarget swap[3],main,off,vram,upload;
     VkRenderPass passes[4];VkCommandPool pool;VkCommandBuffer command,commands[2],presents[2];VkFence fence,fences[2],acquireFence;
     unsigned slot;int pending[2],stamped[2],sceneQueued;VkQueryPool timestamps;float timestampPeriod;
     VkDescriptorSetLayout setLayout;VkPipelineLayout pipelineLayout;VkDescriptorPool descriptors;
-    VkDescriptorSet sets[4];VkSampler sampler,linearSampler,vramSampler;
+    VkDescriptorSet sets[5];VkSampler sampler,linearSampler,vramSampler;
     VkShaderModule shaders[20];VkPipeline pipelines[3][18][5][3];
-    XvBuffer vertices,uniforms,staging;
+    XvBuffer vertices,uniforms,staging,uploadRows;
     unsigned vertexCursor,vertexBase,vertexCount,uniformCursor,uniformAlignment;
     const GrVertex *sourceVertices;
     XvTarget *target;int recording,inPass;
     XvUniform state;VkRect2D scissor;int clipEnabled,ui,squeezed,offscreen,drawPrim;
     RECT16 offRect;BlendMode blend;TexFormat format;TextureID texture;
     int mainValid,mainResolved,vramCPUChanged,vramGPUChanged;
+    /* CPU writes not yet on the GPU: x0, y0, x1, y1 (vramCPUChanged). */
+    int dirty[4],uploadReady;
     u16 pixels[1024*512],move[1024*512];
 } xv;
 int g_windowWidth=1280,g_windowHeight=720;
@@ -185,7 +188,7 @@ static void XvStampRead(unsigned slot)
     xvCost.gpuFrames++;xvCost.gpuTotalUS+=us;if(us>xvCost.gpuMaxUS)xvCost.gpuMaxUS=us;xvCost.gpuOver16+=us>16667;
     XvSteadyFrame(us);
 }
-static void XvBufferCreate(XvBuffer *buffer,size_t bytes,VkBufferUsageFlags usage)
+static void XvBufferCreateIn(XvBuffer *buffer,size_t bytes,VkBufferUsageFlags usage,int gpuMemory)
 {
     VkBufferCreateInfo info={.sType=VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,.size=bytes,.usage=usage};
     XV_CALL(vkCreateBuffer(xv.device,&info,NULL,&buffer->buffer));
@@ -194,7 +197,7 @@ static void XvBufferCreate(XvBuffer *buffer,size_t bytes,VkBufferUsageFlags usag
      * host memory for staging; vertex/uniform storage must remain GPU-visible. */
     VkPhysicalDeviceMemoryProperties properties;vkGetPhysicalDeviceMemoryProperties(xv.physical,&properties);
     unsigned memoryType=0;
-    if(!(usage & ~(VK_BUFFER_USAGE_TRANSFER_SRC_BIT|VK_BUFFER_USAGE_TRANSFER_DST_BIT)))
+    if(!gpuMemory && !(usage & ~(VK_BUFFER_USAGE_TRANSFER_SRC_BIT|VK_BUFFER_USAGE_TRANSFER_DST_BIT)))
         for(unsigned i=0;i<properties.memoryTypeCount;i++)
             if((requirements.memoryTypeBits & (1u<<i)) &&
                (properties.memoryTypes[i].propertyFlags & (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_CACHED_BIT)) ==
@@ -204,6 +207,10 @@ static void XvBufferCreate(XvBuffer *buffer,size_t bytes,VkBufferUsageFlags usag
     XV_CALL(vkBindBufferMemory(xv.device,buffer->buffer,buffer->memory,0));
     XV_CALL(vkMapMemory(xv.device,buffer->memory,0,VK_WHOLE_SIZE,0,(void **)&buffer->map));buffer->size=bytes;
 }
+/* The rectangle uploads' rows (NativeRenderer_UpdateVRAM) live in GPU memory:
+ * vulkan4xenon draws a copy from there, and copies from cached memory only
+ * whole images, on the CPU. */
+static void XvBufferCreate(XvBuffer *buffer,size_t bytes,VkBufferUsageFlags usage) { XvBufferCreateIn(buffer,bytes,usage,0); }
 static void XvBegin(void)
 {
     if(xv.recording)return;
@@ -411,7 +418,7 @@ static void XvQuad(XvTarget *to,XvTarget *from,int mode,int x,int y,int width,in
     VkRect2D clip={{x,y},{width,height}};vkCmdSetViewport(xv.command,0,1,&vp);vkCmdSetScissor(xv.command,0,1,&clip);
     XvUniform state={0};state.scale[3]=(float)mode;
     state.source[0]=sx;state.source[1]=sy;state.source[2]=sw;state.source[3]=sh;
-    unsigned texture=from==&xv.vram?0:from==&xv.main?(mode==3?3:1):2;
+    unsigned texture=from==&xv.vram?0:from==&xv.main?(mode==3?3:1):from==&xv.off?2:4;
     XvBindUniform(&state,texture);vkCmdBindPipeline(xv.command,VK_PIPELINE_BIND_POINT_GRAPHICS,XvPipeline(to->pass,14+mode,BM_NONE,0));
     VkDeviceSize quadOffset=XV_VERTEX_BYTES;vkCmdBindVertexBuffers(xv.command,0,1,&xv.vertices.buffer,&quadOffset);
     vkCmdDraw(xv.command,4,1,0,0);
@@ -429,29 +436,87 @@ static void XvReadTarget(XvTarget *target)
     VkMappedMemoryRange range={.sType=VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,.memory=xv.staging.memory,.size=VK_WHOLE_SIZE};
     XV_CALL(vkInvalidateMappedMemoryRanges(xv.device,1,&range));
 }
-static void XvSyncCPU(void)
+static void XvReadBack(void)
 {
-    if(!xv.vramGPUChanged)return;
     xvCost.reads++;
     XvApplyFills();XvReadTarget(&xv.vram);
     for(unsigned i=0;i<1024*512;i++)xv.pixels[i]=(u16)(xv.staging.map[4*i]|xv.staging.map[4*i+1]<<8);
     xv.vramGPUChanged=0;
     XvPaletteReset();
 }
-void NativeRenderer_UpdateVRAM(void)
+/* Before the CPU reads VRAM. Its pending writes go up first, so the readback
+ * (a whole-image copy the CPU makes from write-combined memory, about 50 ms)
+ * brings them back with everything the GPU drew. */
+static void XvSyncCPU(void)
 {
-    if(!xv.vramCPUChanged)return;
-    XvPaletteReset();
-    xvCost.uploads++;
-    /* A previous submit may still read the staging buffer. Never overwrite it
-     * until the fence; CPU writes merge with GPU-produced VRAM in Copy/Clear. */
-    XvSubmit();
+    if(xv.vramCPUChanged && xv.vramGPUChanged)NativeRenderer_UpdateVRAM();
+    if(!xv.vramGPUChanged)return;
+    XvReadBack();
+}
+/* A CPU write into VRAM. Only its rectangle goes up, so it needs no readback
+ * first: the track preview movies, a frame each update, read the whole VRAM
+ * back and uploaded it again every frame and ran at 6 FPS. While the GPU holds
+ * pixels the CPU lacks, the pending rectangle is uploaded before a write
+ * elsewhere, which a bounding box would cover with stale pixels. */
+static void XvDirty(int x,int y,int w,int h)
+{
+    int *d=xv.dirty;
+    if(xv.vramCPUChanged && !(x>=d[0] && y>=d[1] && x+w<=d[2] && y+h<=d[3])){
+        if(xv.vramGPUChanged && !(x<=d[0] && y<=d[1] && x+w>=d[2] && y+h>=d[3]))NativeRenderer_UpdateVRAM();
+    }
+    if(!xv.vramCPUChanged){d[0]=x;d[1]=y;d[2]=x+w;d[3]=y+h;}
+    else{if(x<d[0])d[0]=x;if(y<d[1])d[1]=y;if(x+w>d[2])d[2]=x+w;if(y+h>d[3])d[3]=y+h;}
+    xv.vramCPUChanged=1;
+}
+static void XvDirtyAll(void) { xv.dirty[0]=0;xv.dirty[1]=0;xv.dirty[2]=1024;xv.dirty[3]=512;xv.vramCPUChanged=1; }
+static void XvUploadAll(void)
+{
     for(unsigned i=0;i<1024*512;i++){xv.staging.map[4*i]=(u8)xv.pixels[i];xv.staging.map[4*i+1]=(u8)(xv.pixels[i]>>8);xv.staging.map[4*i+2]=0;xv.staging.map[4*i+3]=255;}
     VkMappedMemoryRange range={.sType=VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,.memory=xv.staging.memory,.size=VK_WHOLE_SIZE};XV_CALL(vkFlushMappedMemoryRanges(xv.device,1,&range));
     XvLayout(&xv.vram,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
     VkBufferImageCopy region={.imageSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1},.imageExtent={1024,512,1}};
     vkCmdCopyBufferToImage(xv.command,xv.staging.buffer,xv.vram.image,xv.vram.layout,1,&region);
-    XvLayout(&xv.vram,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);xv.vramCPUChanged=0;
+    XvLayout(&xv.vram,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+}
+/* The rectangle's rows go into the upload image at its origin, as a copy the
+ * GPU draws (vulkan4xenon's drawn_upload: rows of a linear texture's pitch,
+ * 64 texels, and a rectangle on the 8-pixel resolve grid), then a texel-exact
+ * quad draws them into VRAM at their place. */
+static void XvUploadRect(int x,int y,int w,int h)
+{
+    unsigned pitch=((unsigned)w+63u)&~63u;
+    for(int row=0;row<h;row++){
+        const u16 *in=xv.pixels+(y+row)*1024+x;u8 *out=xv.uploadRows.map+(size_t)row*pitch*4;
+        for(int i=0;i<w;i++){out[4*i]=(u8)in[i];out[4*i+1]=(u8)(in[i]>>8);out[4*i+2]=0;out[4*i+3]=255;}
+    }
+    XvBegin();XvEndPass();
+    XvLayout(&xv.upload,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    VkBufferImageCopy region={.bufferRowLength=pitch,.imageSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1},
+        .imageExtent={((unsigned)w+7u)&~7u,((unsigned)h+7u)&~7u,1}};
+    vkCmdCopyBufferToImage(xv.command,xv.uploadRows.buffer,xv.upload.image,xv.upload.layout,1,&region);
+    XvQuad(&xv.vram,&xv.upload,0,x,y,w,h,0,0,w/1024.0f,h/512.0f);
+    XvLayout(&xv.vram,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+}
+void NativeRenderer_UpdateVRAM(void)
+{
+    if(!xv.vramCPUChanged)return;
+    XvPaletteReset();
+    xvCost.uploads++;
+    /* A previous submit may still read the staging or upload rows. Never
+     * overwrite them until the fence. */
+    XvSubmit();
+    int x=xv.dirty[0],y=xv.dirty[1],w=xv.dirty[2]-x,h=xv.dirty[3]-y;
+    xv.vramCPUChanged=0;
+    if(w==1024 && h==512){XvUploadAll();return;}
+    if(xv.uploadReady){XvUploadRect(x,y,w,h);return;}
+    /* No rectangle uploads: the whole image goes up, and the pixels the GPU
+     * drew come back first, keeping the rectangle's. */
+    if(xv.vramGPUChanged){
+        for(int row=0;row<h;row++)memcpy(xv.move+row*w,xv.pixels+(y+row)*1024+x,w*2);
+        XvReadBack();
+        for(int row=0;row<h;row++)memcpy(xv.pixels+(y+row)*1024+x,xv.move+row*w,w*2);
+    }
+    XvUploadAll();
 }
 
 static void XvCreatePasses(void)
@@ -542,21 +607,25 @@ int NativeRenderer_InitialiseRender(char *name,int width,int height,int fullscre
     }
     /* Flat primitives return white in psx.frag; no dummy render target is needed. */
     Platform_Log("[vulkan] creating main, offscreen and VRAM targets\n");
-    XvImage(&xv.main,XV_WIDTH,XV_HEIGHT,1);XvImage(&xv.off,1024,512,1);XvImage(&xv.vram,1024,512,0);
+    XvImage(&xv.main,XV_WIDTH,XV_HEIGHT,1);XvImage(&xv.off,1024,512,1);XvImage(&xv.vram,1024,512,0);XvImage(&xv.upload,1024,512,0);
     Platform_Log("[vulkan] targets ready; creating upload buffers and descriptors\n");
     XvBufferCreate(&xv.vertices,XV_VERTEX_BYTES+4*sizeof(XvQuadVertex),VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
     XvQuadVertex *quad=(XvQuadVertex *)(xv.vertices.map+XV_VERTEX_BYTES);
     memset(quad,0,4*sizeof(*quad));quad[1].position[1]=1;quad[2].position[0]=1;quad[3].position[0]=1;quad[3].position[1]=1;
     XvBufferCreate(&xv.uniforms,XV_UNIFORM_BYTES,VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
     XvBufferCreate(&xv.staging,XV_WIDTH*XV_HEIGHT*4,VK_BUFFER_USAGE_TRANSFER_SRC_BIT|VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+    /* 32 rows of slack: a linear texture's fetch covers whole 32-row tiles. */
+    XvBufferCreateIn(&xv.uploadRows,1024*544*4,VK_BUFFER_USAGE_TRANSFER_SRC_BIT,1);
+    xv.uploadReady=(xsdk_gpu_address((volatile const uint32_t *)xv.uploadRows.map)&4095u)==0;
+    if(!xv.uploadReady)Platform_Log("[vulkan] upload rows not 4 KB aligned; VRAM writes upload the whole image\n");
     VkDescriptorSetLayoutBinding bindings[]={
         {.binding=0,.descriptorType=VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,.descriptorCount=1,.stageFlags=VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT},
         {.binding=1,.descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,.descriptorCount=1,.stageFlags=VK_SHADER_STAGE_FRAGMENT_BIT}};
     VkDescriptorSetLayoutCreateInfo layout={.sType=VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,.bindingCount=2,.pBindings=bindings};
     XV_CALL(vkCreateDescriptorSetLayout(xv.device,&layout,NULL,&xv.setLayout));
     VkPipelineLayoutCreateInfo pl={.sType=VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,.setLayoutCount=1,.pSetLayouts=&xv.setLayout};XV_CALL(vkCreatePipelineLayout(xv.device,&pl,NULL,&xv.pipelineLayout));
-    VkDescriptorPoolSize sizes[]={{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,4},{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,4}};
-    VkDescriptorPoolCreateInfo dp={.sType=VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,.maxSets=4,.poolSizeCount=2,.pPoolSizes=sizes};XV_CALL(vkCreateDescriptorPool(xv.device,&dp,NULL,&xv.descriptors));
+    VkDescriptorPoolSize sizes[]={{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,5},{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,5}};
+    VkDescriptorPoolCreateInfo dp={.sType=VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,.maxSets=5,.poolSizeCount=2,.pPoolSizes=sizes};XV_CALL(vkCreateDescriptorPool(xv.device,&dp,NULL,&xv.descriptors));
     VkSamplerCreateInfo sampler={.sType=VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,.magFilter=VK_FILTER_NEAREST,.minFilter=VK_FILTER_NEAREST,
         .mipmapMode=VK_SAMPLER_MIPMAP_MODE_NEAREST,.addressModeU=VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,.addressModeV=VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,.addressModeW=VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE};
     XV_CALL(vkCreateSampler(xv.device,&sampler,NULL,&xv.sampler));
@@ -565,8 +634,8 @@ int NativeRenderer_InitialiseRender(char *name,int width,int height,int fullscre
     sampler.minFilter=VK_FILTER_NEAREST;sampler.magFilter=VK_FILTER_NEAREST;
     sampler.addressModeU=sampler.addressModeV=VK_SAMPLER_ADDRESS_MODE_REPEAT;
     XV_CALL(vkCreateSampler(xv.device,&sampler,NULL,&xv.vramSampler));
-    XvTarget *textures[]={&xv.vram,&xv.main,&xv.off,&xv.main};
-    for(unsigned i=0;i<4;i++){
+    XvTarget *textures[]={&xv.vram,&xv.main,&xv.off,&xv.main,&xv.upload};
+    for(unsigned i=0;i<5;i++){
         VkDescriptorSetAllocateInfo alloc={.sType=VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,.descriptorPool=xv.descriptors,.descriptorSetCount=1,.pSetLayouts=&xv.setLayout};
         XV_CALL(vkAllocateDescriptorSets(xv.device,&alloc,&xv.sets[i]));
         VkDescriptorBufferInfo buffer={xv.uniforms.buffer,0,sizeof(XvUniform)};
@@ -594,7 +663,7 @@ int NativeRenderer_InitialiseRender(char *name,int width,int height,int fullscre
     for(unsigned shader=0;shader<14;shader++)for(unsigned blend=0;blend<5;blend++)for(unsigned mask=1;mask<3;mask++)XvPipeline(0,shader,(BlendMode)blend,mask);
     for(unsigned pass=0;pass<3;pass++)for(unsigned mode=0;mode<4;mode++)XvPipeline(pass,14+mode,BM_NONE,0);
     Platform_Log("[vulkan] pipelines ready; submitting initial clears\n");
-    XvSubmit();xv.state.rect[2]=512;xv.state.rect[3]=216;xv.state.scale[0]=1;xv.vramCPUChanged=1;
+    XvSubmit();xv.state.rect[2]=512;xv.state.rect[3]=216;xv.state.scale[0]=1;XvDirtyAll();
     if(xvSelfTest)XvColorCheck();
     /* After the boot checks, which measure the full 720p raster. */
     if(!g_nativeHDWidescreen && video.is_widescreen){
@@ -733,13 +802,12 @@ void NativeRenderer_CopyVRAM(u16 *src, int x, int y, int w, int h, int dst_x, in
   XvSyncCPU();
   src=xv.pixels;
  }
- XvSyncCPU();
+ XvDirty(dst_x,dst_y,w,h);
  firstRow=0;endRow=h;rowStep=1;
  if (fromVRAM && dst_y > y && dst_y < y+h) {firstRow=h-1;endRow=-1;rowStep=-1;}
  for (row=firstRow;row!=endRow;row+=rowStep)
   memmove(xv.pixels+(dst_y+row)*VRAM_WIDTH+dst_x,
           src+(y+row)*stride+x,w*sizeof(u16));
- xv.vramCPUChanged=1;
 }
 
 void NativeRenderer_ReadVRAM(u16 *dst,int x,int y,int w,int h)
@@ -755,7 +823,7 @@ int NativeRenderer_CaptureVRAMState(void *dst,int size)
 int NativeRenderer_RestoreVRAMState(const void *src,int size)
 {
     if(!src || size<(int)sizeof(xv.pixels))return 0;XvSubmit();memcpy(xv.pixels,src,sizeof(xv.pixels));
-    xv.vramCPUChanged=1;xv.vramGPUChanged=0;xv.mainValid=0;xvPendingFillCount=0;return 1;
+    XvDirtyAll();xv.vramGPUChanged=0;xv.mainValid=0;xvPendingFillCount=0;return 1;
 }
 static int XvRectInside(int x,int y,int w,int h,int ox,int oy,int ow,int oh) { return x>=ox && y>=oy && x+w<=ox+ow && y+h<=oy+oh; }
 void NativeRenderer_ClearVRAM(int x,int y,int w,int h,u8 r,u8 g,u8 b)
@@ -1020,7 +1088,7 @@ static void XvColorSweep(void)
             }
         }
         NativeRenderer_SetTexture(NativeRenderer_GetVRAMTexture(),(TexFormat)format);
-        xv.vramCPUChanged=1;NativeRenderer_UpdateVRAM();xv.off.clearStencil=1;XvPass(&xv.off);
+        XvDirtyAll();NativeRenderer_UpdateVRAM();xv.off.clearStencil=1;XvPass(&xv.off);
         VkClearAttachment clear={.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT,.colorAttachment=0,.clearValue.color.float32={0,0,0,0}};
         VkClearRect rect={.rect={{0,0},{256,256}},.layerCount=1};vkCmdClearAttachments(xv.command,1,&clear,1,&rect);
         NativeRenderer_UpdateVertexBuffer(vertices,256*6);XvDrawTriangles(0,256*2,filtering);XvReadTarget(&xv.off);
@@ -1087,7 +1155,7 @@ static void XvMeshCheck(void)
         }
         NativeRenderer_SetTexture(flat?NativeRenderer_GetWhiteTexture():NativeRenderer_GetVRAMTexture(),TF_4_BIT);
         xv.blend=flat?BM_ADD:BM_NONE;
-        xv.vramCPUChanged=1;NativeRenderer_UpdateVRAM();xv.main.clearStencil=1;XvPass(&xv.main);
+        XvDirtyAll();NativeRenderer_UpdateVRAM();xv.main.clearStencil=1;XvPass(&xv.main);
         VkClearAttachment clear={.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT,.colorAttachment=0,.clearValue.color.float32={0,0,flat?0:1,0}};
         VkClearRect rect={.rect={{0,0},{XV_WIDTH,XV_HEIGHT}},.layerCount=1};vkCmdClearAttachments(xv.command,1,&clear,1,&rect);
         NativeRenderer_UpdateVertexBuffer(vertices,COUNT);XvDrawTriangles(0,COUNT/3,filtering);XvReadTarget(&xv.main);
@@ -1162,7 +1230,7 @@ static void XvColorCheck(void)
             vertices[i].g=blending?64:flat?128:modulation?96:255;
             vertices[i].b=blending?32:flat?192:modulation?32:255;
         }
-        xv.vramCPUChanged=1;
+        XvDirtyAll();
         xv.off.clearStencil=1;
         if(!xv.offscreen)xv.main.clearStencil=1;
         if(blending || stress){
@@ -1200,7 +1268,7 @@ static void XvColorCheck(void)
 static void XvPrepareForGame(void)
 {
     g_dbg_texturelessMode=0;xv.blend=BM_NONE;xvPendingFillCount=0;
-    memset(xv.pixels,0,sizeof(xv.pixels));xv.vramCPUChanged=1;xv.vramGPUChanged=0;
+    memset(xv.pixels,0,sizeof(xv.pixels));XvDirtyAll();xv.vramGPUChanged=0;
     xv.offscreen=0;xv.drawPrim=0;xv.texture=NativeRenderer_GetVRAMTexture();xv.format=TF_4_BIT;xv.vertexCursor=0;xv.vertexCount=0;
     xv.mainValid=xv.mainResolved=0;
     // Both passes LOAD their color attachment. Do not leave test patterns for

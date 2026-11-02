@@ -18,7 +18,7 @@ def function(source,start):
  return source[begin:end]+'\n'
 pending=re.search(r'enum \{ XV_PENDING_FILLS=16 \};.*?static unsigned xvPendingFillCount;',s,re.S)[0]
 code=''.join(function(s,name) for name in ('static void XvEndPass(','static void XvLayout(','static void XvPass(',
- 'static void XvApplyFills(','static void XvQuad(','static void XvSyncCPU(','static int XvValidRect(','static int XvRectInside(',
+ 'static void XvApplyFills(','static void XvQuad(','static void XvReadBack(','static void XvSyncCPU(','static void XvDirtyAll(','static int XvValidRect(','static int XvRectInside(',
  'void NativeRenderer_ClearVRAM(','void NativeRenderer_Clear(','static void XvPack(','int NativeRenderer_RestoreVRAMState('))
 c=r'''
 #include <vulkan/vulkan.h>
@@ -37,8 +37,8 @@ typedef struct {VkImage image;VkFramebuffer framebuffer;VkImageLayout layout;uns
 typedef struct {float rect[4],scale[4],flags[4],source[4];} XvUniform;
 typedef struct {VkBuffer buffer;unsigned char *map;size_t size;} XvBuffer;
 static struct {
- VkCommandBuffer command;XvTarget swap[1],main,off,vram;VkRenderPass passes[4];XvTarget *target;int recording,inPass;
- XvBuffer staging,vertices;int mainValid,mainResolved,vramCPUChanged,vramGPUChanged;u16 pixels[1024*512];
+ VkCommandBuffer command;XvTarget swap[1],main,off,vram,upload;VkRenderPass passes[4];XvTarget *target;int recording,inPass;
+ XvBuffer staging,vertices;int mainValid,mainResolved,vramCPUChanged,vramGPUChanged,dirty[4];u16 pixels[1024*512];
 } xv;
 static struct {unsigned passes,quads[4],reads;} xvCost;
 enum {XV_VERTEX_BYTES=0,BM_NONE=0};

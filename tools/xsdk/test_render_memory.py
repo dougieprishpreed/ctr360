@@ -8,7 +8,7 @@ p.add_argument('--out',type=Path,required=True)
 a=p.parse_args();a.out.mkdir(parents=True,exist_ok=True)
 root=Path(__file__).resolve().parents[2]
 source=(root/'platform/xsdk/native_xsdk_video.c').read_text()
-buffer=source[source.index('static void XvBufferCreate('):source.index('static void XvBegin(')]
+buffer=source[source.index('static void XvBufferCreateIn('):source.index('static void XvBegin(')]
 passes=source[source.index('static void XvCreatePasses('):source.index('static void XvConfig(')]
 c=r'''
 #include <vulkan/vulkan.h>
@@ -44,6 +44,8 @@ int main(void){
  XvBufferCreate(&b,2048,VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);assert(selected==0);
  XvBufferCreate(&b,2048,VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);assert(selected==0);
  mask=1;XvBufferCreate(&b,2048,VK_BUFFER_USAGE_TRANSFER_SRC_BIT);assert(selected==0);
+ /* The rectangle uploads' rows: GPU memory although only copied from. */
+ mask=3;XvBufferCreateIn(&b,2048,VK_BUFFER_USAGE_TRANSFER_SRC_BIT,1);assert(selected==0);
  XvCreatePasses();assert(pass==4);return 0;
 }
 '''

@@ -9,7 +9,7 @@ root=Path(__file__).resolve().parents[2];s=(root/'platform/xsdk/native_xsdk_vide
 body=s[s.index('static void XvImage('):s.index('static VkPipeline XvPipeline(')]
 structure=re.search(r'typedef struct \{\s*VkImage image;.*?} XvTarget;',s,re.S).group(0)
 calls=re.findall(r'XvImage\(&xv\.\w+,[^;]+;',s)
-assert len(calls)==3,calls
+assert len(calls)==4,calls
 c=r"""
 #include <vulkan/vulkan.h>
 #include <assert.h>
@@ -18,7 +18,7 @@ c=r"""
 #include <stdio.h>
 """+structure+r"""
 enum {XV_WIDTH=1280,XV_HEIGHT=720};
-static struct {VkDevice device;VkCommandBuffer command;VkRenderPass passes[3];XvTarget main,off,vram;} xv;
+static struct {VkDevice device;VkCommandBuffer command;VkRenderPass passes[3];XvTarget main,off,vram,upload;} xv;
 static unsigned images,framebuffers,colorClears,depthClears;
 #define XV_CALL(call) do { if((call)!=VK_SUCCESS)exit(42); } while(0)
 static void XvLayout(XvTarget *t,VkImageLayout l){t->layout=l;}
@@ -37,9 +37,9 @@ void vkCmdClearColorImage(VkCommandBuffer b,VkImage i,VkImageLayout l,const VkCl
 void vkCmdClearDepthStencilImage(VkCommandBuffer b,VkImage i,VkImageLayout l,const VkClearDepthStencilValue *c,uint32_t n,const VkImageSubresourceRange *r){(void)b;assert(i && l==VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && n==1);assert(c->depth==1 && c->stencil==0);assert(r->aspectMask==(VK_IMAGE_ASPECT_DEPTH_BIT|VK_IMAGE_ASPECT_STENCIL_BIT));depthClears++;}
 void vkCmdPipelineBarrier(VkCommandBuffer b,VkPipelineStageFlags s,VkPipelineStageFlags d,VkDependencyFlags f,uint32_t nm,const VkMemoryBarrier *m,uint32_t nb,const VkBufferMemoryBarrier *bb,uint32_t ni,const VkImageMemoryBarrier *i){(void)b;(void)s;(void)d;(void)f;(void)nm;(void)m;(void)nb;(void)bb;assert(ni==1 && i->image);}
 """+body+'\nint main(int argc,char **argv){(void)argv;\n'+''.join(calls)+r"""
- assert(images==5 && framebuffers==3 && colorClears==3 && depthClears==2);
+ assert(images==6 && framebuffers==4 && colorClears==4 && depthClears==2);
  if(argc>1){XvTarget old={0};XvImage(&old,1,1,0);return 1;}
- puts("PASS: actual target creation/initialization; 3 color, 2 depth; tiny-target rejection reproduced");return 0;
+ puts("PASS: actual target creation/initialization; 4 color (the upload image too), 2 depth; tiny-target rejection reproduced");return 0;
 }
 """
 source=a.out/'targets.c';source.write_text(c);exe=(a.out/'targets-test').resolve()

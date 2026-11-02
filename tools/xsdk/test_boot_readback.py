@@ -90,6 +90,7 @@ static void XvRasterMesh(const GrVertex *v,int n){
 static void XvLayout(XvTarget *t,VkImageLayout layout){t->layout=layout;}
 static void XvSubmit(void){}
 static void NativeRenderer_UpdateVRAM(void){xv.vramCPUChanged=0;}
+static void XvDirtyAll(void){xv.vramCPUChanged=1;}
 static void NativeRenderer_SetTexture(unsigned id,TexFormat f){xv.texture=id;xv.format=f;}
 static unsigned NativeRenderer_GetWhiteTexture(void){return 2;}
 static unsigned NativeRenderer_GetVRAMTexture(void){return 1;}
